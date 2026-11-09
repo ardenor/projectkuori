@@ -1,0 +1,2811 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#071018" />
+    <link rel="icon" href="data:," />
+    <title>Companion Core</title>
+    <style>
+      /* Shared colors, typography, and predictable sizing for the whole console. */
+      :root {
+        color-scheme: dark;
+        font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+        background: #071018;
+        color: #e7f2ef;
+        font-synthesis: none;
+        --matrix-text-brightness: 1;
+        --app-primary: #1b625b;
+        --app-primary-border: #69c5bc;
+      }
+
+      * { box-sizing: border-box; }
+      input { accent-color: var(--app-primary-border); }
+
+      body {
+        min-width: 320px;
+        min-height: 100vh;
+        margin: 0;
+        padding: 18px;
+        background-color: #071018;
+        background-image: radial-gradient(ellipse at 18% 0%, color-mix(in srgb, var(--app-primary) 24%, transparent), transparent 42%),
+          linear-gradient(rgba(63, 107, 111, 0.07) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(63, 107, 111, 0.07) 1px, transparent 1px);
+        background-size: auto, 38px 38px, 38px 38px;
+      }
+
+      #hud-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(320px, 390px);
+        gap: 16px;
+        width: min(1600px, 100%);
+        height: calc(100vh - 36px);
+        min-height: 500px;
+        margin: 0 auto;
+      }
+
+      /* Keep both application panels bounded inside the viewport. */
+      #matrix-panel, #control-panel {
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+        background: rgba(8, 20, 29, 0.94);
+        border: 1px solid color-mix(in srgb, var(--app-primary) 42%, #285660);
+      }
+
+      /* The canvas is the interactive perspective view of saved memory nodes. */
+      #matrix-panel {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        border-radius: 8px;
+        box-shadow: inset 0 0 70px rgba(9, 85, 95, 0.12);
+      }
+
+      .field-tabs { flex: 0 0 auto; margin: 0 12px; padding: 8px 0; }
+      .field-tabs .view-tab { flex: 1 1 0; min-width: 0; padding: 0 7px; font-size: 10px; }
+      .field-tabs .view-tab { font-size: 9px; }
+      .field-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+      .field-view { position: absolute; inset: 0; min-width: 0; min-height: 0; overflow: hidden; }
+      .field-view[hidden] { display: none; }
+      #field-view-3d { cursor: grab; }
+      #field-view-3d:active { cursor: grabbing; }
+      #canvas3d { display: block; width: 100%; height: 100%; }
+
+      .field-subhead { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; padding: 16px 18px 12px; border-bottom: 1px solid #1d3b43; }
+      .field-subhead h2 { margin: 3px 0 0; color: #eff8f5; font-size: 16px; }
+      .field-kicker { color: var(--app-primary-border); font: 10px "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
+      .field-note { color: #b7c9c6; font: 10px/1.5 "SFMono-Regular", Consolas, monospace; text-align: right; }
+      .category-pages { display: flex; gap: 5px; padding: 9px 14px; overflow-x: auto; border-bottom: 1px solid #1d3b43; }
+      .category-page-button { flex: 0 0 auto; min-width: 68px; height: 30px; padding: 0 8px; background: transparent; border-color: transparent; color: #a9bfbb; font-size: 9px; }
+      .category-page-button[aria-selected="true"] { background: color-mix(in srgb, var(--app-primary) 52%, transparent); border-color: var(--app-primary-border); color: #eff8f5; }
+      .page-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 16px; color: #b7c9c6; font: 10px "SFMono-Regular", Consolas, monospace; }
+      .page-toolbar button { min-width: 34px; width: 34px; height: 30px; padding: 0; }
+      .memory-pages-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); grid-auto-rows: minmax(138px, auto); align-content: start; gap: 10px; padding: 10px 16px 18px; overflow-y: auto; height: calc(100% - 146px); }
+      .memory-page-card {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: flex-start;
+        min-height: 138px;
+        padding: 12px;
+        border: 1px solid #31545a;
+        border-radius: 6px;
+        background: rgba(5, 16, 23, 0.84);
+        cursor: pointer;
+        text-align: left;
+        overflow-wrap: anywhere;
+        transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+      }
+      .memory-page-card[data-importance="high"] { border-color: #cf8a68; }
+      .memory-page-card[data-importance="low"] { border-color: #718c98; }
+      .memory-page-card.search-highlight { border-color: var(--app-primary-border); box-shadow: 0 0 0 1px color-mix(in srgb, var(--app-primary-border) 70%, transparent); }
+      .memory-pages-grid.is-searching .memory-page-card { animation: memory-tile-arrive 0.3s ease both; animation-delay: calc(var(--tile-index, 0) * 28ms); }
+      .memory-page-card.search-focus { z-index: 1; border-color: #a5e8dc; box-shadow: 0 0 0 2px color-mix(in srgb, #a5e8dc 55%, transparent), 0 8px 24px rgba(0, 0, 0, 0.28); animation: memory-search-focus 0.55s ease-in-out infinite alternate; }
+      @keyframes memory-tile-arrive { from { opacity: 0.35; transform: translateY(9px); } to { opacity: 1; transform: translateY(0); } }
+      @keyframes memory-search-focus { to { transform: translateY(-3px); } }
+      .memory-page-category { margin-bottom: 8px; color: var(--app-primary-border); font: 9px "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
+      .memory-page-card p {
+        margin: 0;
+        width: 100%;
+        color: #e1ece9;
+        font-size: 12px;
+        line-height: 1.45;
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+      .memory-page-meta { margin-top: auto; padding-top: 10px; color: #9db3b1; font: 9px "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
+      .timeline-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; padding: 14px 18px 8px; color: #b7c9c6; font: 10px "SFMono-Regular", Consolas, monospace; }
+      .timeline-controls input { grid-column: 1 / -1; }
+      .timeline-controls input { width: 100%; }
+      .timeline-graph { display: flex; align-items: flex-end; gap: 4px; height: 105px; margin: 12px 18px; padding: 8px 10px 0; border-bottom: 1px solid #31545a; }
+      .timeline-bar { flex: 0 0 14px; min-width: 3px; background: color-mix(in srgb, var(--app-primary-border) 68%, transparent); border-radius: 2px 2px 0 0; }
+      .timeline-list { height: calc(100% - 206px); overflow-y: auto; padding: 4px 18px 16px; }
+      .timeline-entry { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 12px; padding: 10px 0; border-bottom: 1px solid #1d3b43; }
+      .timeline-date { color: var(--app-primary-border); font: 10px "SFMono-Regular", Consolas, monospace; }
+      .timeline-entry p { margin: 0; color: #e1ece9; font-size: 12px; line-height: 1.45; }
+      #field-view-lab { display: flex; flex-direction: column; }
+      #field-view-lab[hidden] { display: none; }
+      .lab-layout { display: grid; grid-template-columns: minmax(200px, 0.8fr) minmax(0, 1.2fr); gap: 14px; min-height: 0; flex: 1; padding: 14px 16px; }
+      .lab-memory-picker { min-height: 0; overflow-y: auto; border-right: 1px solid #1d3b43; padding-right: 12px; }
+      .lab-memory-picker h3, .lab-result h3 { margin: 0 0 9px; color: #dce9e6; font-size: 12px; }
+      .lab-memory-option { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 7px; padding: 7px 0; border-bottom: 1px solid #1d3b43; color: #c5d5d2; font-size: 10px; line-height: 1.4; }
+      .lab-memory-option input { margin: 1px 0 0; }
+      .lab-workspace { display: flex; flex-direction: column; min-height: 0; gap: 9px; }
+      #lab-prompt { width: 100%; min-height: 70px; resize: vertical; padding: 10px; border: 1px solid #31545a; border-radius: 5px; background: #0b1a23; color: #eff8f5; font: 12px/1.5 "Avenir Next", Avenir, sans-serif; }
+      .lab-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+      .lab-actions button { min-width: 0; height: 34px; }
+      .lab-results { flex: 1; min-height: 0; overflow-y: auto; }
+      .lab-result { padding: 11px 0; border-bottom: 1px solid #1d3b43; }
+      .lab-result p { margin: 5px 0 0; color: #d3e2df; font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
+      .lab-result-tag { color: var(--app-primary-border); font: 9px "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
+
+      .matrix-heading {
+        position: absolute;
+        top: 18px;
+        left: 20px;
+        pointer-events: none;
+      }
+
+      .eyebrow, #network-tag, #action-tag {
+        color: var(--app-primary-border);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 5px 0 0;
+        color: #eff8f5;
+        font-size: 20px;
+        font-weight: 600;
+      }
+
+      .matrix-axis-note {
+        margin-top: 6px;
+        color: #c2d5d1;
+        font: 10px/1.5 "SFMono-Regular", Consolas, monospace;
+      }
+
+      .matrix-category-legend {
+        position: absolute;
+        bottom: 15px;
+        left: 18px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px 12px;
+        max-width: 72%;
+        color: #d0dfdc;
+        font: 9px "SFMono-Regular", Consolas, monospace;
+        pointer-events: none;
+        filter: brightness(var(--matrix-text-brightness));
+      }
+
+      .matrix-category-legend span { display: inline-flex; align-items: center; gap: 5px; }
+      .category-swatch { width: 7px; height: 7px; border-radius: 50%; }
+      .swatch-health { background: #6fc4b0; }
+      .swatch-work { background: #59becf; }
+      .swatch-relationships { background: #ec8e80; }
+      .swatch-goals { background: #bacd77; }
+      .swatch-preferences { background: #a4a3e0; }
+      .swatch-home { background: #d8b37e; }
+      .swatch-other { background: #9db3b1; }
+
+      .matrix-tools {
+        position: absolute;
+        top: 16px;
+        right: 16px;
+        display: flex;
+        gap: 5px;
+        filter: brightness(var(--matrix-text-brightness));
+      }
+
+      .matrix-tools button {
+        height: 32px;
+        min-width: 56px;
+        padding: 0 9px;
+        background: rgba(8, 24, 31, 0.88);
+        border-color: #31545a;
+        color: #a9bfbb;
+      }
+
+      .matrix-tools button[aria-pressed="true"] {
+        background: var(--app-primary);
+        border-color: var(--app-primary-border);
+        color: #eff8f5;
+      }
+
+      .matrix-tools .reset-view-button { min-width: 36px; }
+      .matrix-help {
+        position: absolute;
+        top: 66px;
+        right: 18px;
+        max-width: 28%;
+        color: #d0dfdc;
+        font: 10px/1.5 "SFMono-Regular", Consolas, monospace;
+        text-align: right;
+        pointer-events: none;
+        filter: brightness(var(--matrix-text-brightness));
+      }
+
+      #matrix-count span { color: var(--app-primary-border); }
+
+      #matrix-count {
+        position: absolute;
+        right: 20px;
+        bottom: 17px;
+        color: #d0dfdc;
+        font: 11px "SFMono-Regular", Consolas, monospace;
+        filter: brightness(var(--matrix-text-brightness));
+      }
+
+      /* The conversation panel keeps status, transcript, and composer in one column. */
+      #control-panel {
+        display: flex;
+        flex-direction: column;
+        padding: 18px;
+        border-radius: 8px;
+      }
+
+      .panel-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #1d3b43;
+      }
+
+      .panel-head h2 {
+        margin: 0;
+        color: #eff8f5;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .view-tabs {
+        display: flex;
+        gap: 6px;
+        padding: 12px 0;
+        border-bottom: 1px solid #1d3b43;
+      }
+
+      .view-tab {
+        min-width: 76px;
+        height: 34px;
+        padding: 0 10px;
+        background: transparent;
+        border-color: transparent;
+        color: #91aaa7;
+      }
+
+      .view-tab[aria-selected="true"] {
+        background: color-mix(in srgb, var(--app-primary) 52%, transparent);
+        border-color: var(--app-primary-border);
+        color: #e7f2ef;
+      }
+
+      #settings-view { overflow-y: auto; padding: 8px 0; }
+      .settings-group { padding: 9px 0; border-bottom: 1px solid #1d3b43; }
+      .settings-group > summary { display: flex; align-items: center; justify-content: space-between; min-height: 28px; color: #dce9e6; font-size: 12px; font-weight: 600; cursor: pointer; list-style: none; }
+      .settings-group > summary::-webkit-details-marker { display: none; }
+      .settings-group > summary::after { content: "+"; color: var(--app-primary-border); font: 16px "SFMono-Regular", Consolas, monospace; }
+      .settings-group[open] > summary { margin-bottom: 8px; }
+      .settings-group[open] > summary::after { content: "−"; }
+      .setting-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 38px; color: #c5d5d2; font-size: 12px; }
+      .setting-row small { display: block; margin-top: 3px; color: #9fb3b0; font-size: 10px; line-height: 1.4; }
+      .setting-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: #69c5bc; }
+      .setting-range { grid-template-columns: minmax(0, 1fr) minmax(100px, 42%); }
+      .setting-range input { width: 100%; accent-color: #69c5bc; }
+      .setting-text { grid-template-columns: minmax(0, 1fr); }
+      .setting-text input { width: 100%; height: 34px; }
+      .setting-color input { width: 38px; height: 30px; padding: 2px; border: 1px solid #45656a; border-radius: 4px; background: #0b1a23; cursor: pointer; }
+      .setting-value { color: #eff8f5; font: 11px "SFMono-Regular", Consolas, monospace; text-align: right; }
+
+      #network-tag { flex: 0 0 auto; color: #e2a56d; }
+      #network-tag.online { color: #78d6a5; }
+      #action-tag { margin-top: 6px; color: #a4b8b5; font-size: 10px; }
+
+      .panel-view { flex: 1 1 auto; min-height: 0; }
+      #chat-view { display: flex; flex-direction: column; }
+      #chat-view[hidden], #nodes-view[hidden] { display: none; }
+      .conversation-tools { display: flex; align-items: center; gap: 7px; padding: 8px 0 0; }
+      .conversation-tools button { min-height: 28px; padding: 0 9px; font-size: 9px; }
+      #archive-state { margin-left: auto; color: #a4b8b5; font: 9px "SFMono-Regular", Consolas, monospace; }
+      .conversation-archive { max-height: 180px; overflow-y: auto; padding: 7px 0; border-bottom: 1px solid #1d3b43; }
+      .conversation-archive[hidden] { display: none; }
+      .archive-entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; padding: 5px 0; border-bottom: 1px solid rgba(29, 59, 67, 0.65); }
+      .archive-entry button { min-width: 0; text-align: left; }
+      .archive-entry .archive-remove { min-width: 30px; width: 30px; padding: 0; }
+      .archive-empty { padding: 10px 0; color: #9fb3b0; font-size: 11px; }
+
+      #console-log {
+        flex: 1 1 auto;
+        min-height: 120px;
+        margin: 0;
+        padding: 16px 2px;
+        overflow-y: auto;
+        color: #d3e2df;
+        font: 13px/1.65 "SFMono-Regular", Consolas, monospace;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .voice-preview {
+        flex: 0 0 auto;
+        margin: 0 2px 10px;
+        padding: 10px 11px;
+        border: 1px solid #31545a;
+        border-radius: 5px;
+        background: rgba(5, 16, 23, 0.88);
+      }
+
+      .voice-preview[hidden] { display: none; }
+      .voice-preview-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--app-primary-border); font: 10px "SFMono-Regular", Consolas, monospace; text-transform: uppercase; }
+      .voice-level-track { height: 3px; margin-top: 8px; overflow: hidden; background: #24383c; }
+      .voice-level-fill { width: 0; height: 100%; background: var(--app-primary-border); transition: width 80ms linear; }
+      .voice-transcript { min-height: 20px; margin-top: 8px; color: #e7f2ef; font: 12px/1.5 "Avenir Next", Avenir, sans-serif; overflow-wrap: anywhere; }
+      .voice-transcript.empty { color: #a4b8b5; font-style: italic; }
+
+      /* Give the text field the flexible space and keep commands a stable size. */
+      .input-bar {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 8px;
+        padding-top: 14px;
+        border-top: 1px solid #1d3b43;
+      }
+
+      #nodes-view { display: flex; flex-direction: column; }
+
+      .memory-toolbar {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 7px;
+        padding: 12px 0;
+        border-bottom: 1px solid #1d3b43;
+      }
+
+      #selection-count {
+        flex: 1 1 100%;
+        color: #a4b8b5;
+        font: 11px "SFMono-Regular", Consolas, monospace;
+      }
+
+      #delete-selected, #clear-all {
+        height: 36px;
+        padding: 0 10px;
+      }
+
+      #clear-all { border-color: #865f4a; background: #453025; }
+      #clear-all:hover { background: #65432f; }
+
+      #memory-list {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+      }
+
+      .memory-row {
+        display: grid;
+        grid-template-columns: 20px minmax(0, 1fr) auto;
+        align-items: start;
+        gap: 9px;
+        padding: 11px 2px;
+        border-bottom: 1px solid #1d3b43;
+        cursor: pointer;
+      }
+
+      .memory-row input { margin: 3px 0 0; accent-color: #66c2b9; }
+      .memory-detail-button { min-width: 40px; height: 28px; padding: 0 6px; background: transparent; border-color: #31545a; color: #b7c9c6; font-size: 9px; }
+      .memory-details { grid-column: 2 / -1; color: #b7c9c6; font-size: 10px; line-height: 1.5; }
+      .memory-details[hidden] { display: none; }
+      .memory-edit-input { width: 100%; min-height: 58px; margin-top: 7px; padding: 7px; border: 1px solid #31545a; border-radius: 4px; background: #0b1a23; color: #eff8f5; font: 11px/1.45 "Avenir Next", Avenir, sans-serif; resize: vertical; }
+      .memory-detail-actions { display: flex; gap: 6px; margin-top: 6px; }
+      .memory-detail-actions button { min-width: 0; height: 27px; padding: 0 8px; font-size: 9px; }
+      .memory-detail-actions .forget-memory-button { background: #352a27; border-color: #805c50; }
+      .memory-content { display: block; color: #e1ece9; font-size: 12px; line-height: 1.45; }
+      .memory-meta { display: block; margin-top: 4px; color: #8ca5a5; font: 10px/1.5 "SFMono-Regular", Consolas, monospace; }
+      .empty-memory-list { padding: 18px 2px; color: #8ca5a5; font-size: 12px; }
+      .memory-review { flex: 0 0 auto; max-height: 34%; overflow-y: auto; padding: 10px 0; border-bottom: 1px solid #1d3b43; }
+      .memory-review[hidden] { display: none; }
+      .memory-review h3 { margin: 0 0 7px; color: #f0c39b; font-size: 11px; }
+      .review-proposal { padding: 8px 0; border-top: 1px solid #1d3b43; }
+      .review-proposal p { margin: 0; color: #e1ece9; font-size: 11px; line-height: 1.45; }
+      .review-proposal small { display: block; margin-top: 4px; color: #a9bfbb; font-size: 9px; }
+      .review-actions { display: flex; gap: 6px; margin-top: 7px; }
+      .review-actions button { min-width: 0; height: 28px; padding: 0 8px; font-size: 9px; }
+      .review-actions .reject-proposal { background: #352a27; border-color: #805c50; }
+      .primary-review-list { height: calc(100% - 78px); overflow-y: auto; padding: 6px 18px 18px; }
+      #field-view-review .review-proposal { padding: 14px 0; }
+      #field-view-review .review-proposal p { font-size: 13px; }
+      #field-view-review .review-proposal small { font-size: 10px; }
+      #field-view-review .review-actions button { min-width: 88px; height: 34px; }
+
+      .dialog-backdrop {
+        position: fixed;
+        z-index: 20;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 16px;
+        background: rgba(2, 8, 14, 0.78);
+      }
+
+      .dialog-backdrop[hidden] { display: none; }
+
+      .confirm-dialog {
+        width: min(440px, 100%);
+        padding: 20px;
+        border: 1px solid #6c5542;
+        border-radius: 6px;
+        background: #0c1a22;
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+      }
+
+      .confirm-dialog h2 { margin: 0; color: #f0c39b; font-size: 16px; }
+      .confirm-dialog p { color: #c4d2cf; font-size: 13px; line-height: 1.5; }
+      .confirm-dialog code { color: #f0c39b; font-weight: 700; }
+      .confirm-dialog input { margin-top: 8px; }
+      .dialog-error { min-height: 18px; color: #ed8585; font-size: 11px; }
+      .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
+      input[type="text"] {
+        width: 100%;
+        min-width: 0;
+        height: 44px;
+        padding: 0 12px;
+        border: 1px solid #31545a;
+        border-radius: 5px;
+        outline: none;
+        background: #0b1a23;
+        color: #eff8f5;
+        font: inherit;
+        font-size: 13px;
+      }
+
+      input[type="text"]:focus { border-color: var(--app-primary-border); box-shadow: 0 0 0 2px color-mix(in srgb, var(--app-primary-border) 28%, transparent); }
+      input[type="text"]::placeholder { color: #829694; }
+
+      button {
+        min-width: 46px;
+        height: 44px;
+        padding: 0 12px;
+        border: 1px solid var(--app-primary-border);
+        border-radius: 5px;
+        background: var(--app-primary);
+        color: #e7f2ef;
+        font: 600 11px "SFMono-Regular", Consolas, monospace;
+        letter-spacing: 0.04em;
+        cursor: pointer;
+      }
+
+      button:hover { background: color-mix(in srgb, var(--app-primary) 78%, white); }
+      button:focus-visible { outline: 2px solid #83d8c8; outline-offset: 2px; }
+      button:disabled { opacity: 0.55; cursor: wait; }
+      #mic-btn { border-color: #865f4a; background: #453025; }
+      #mic-btn:hover { background: #65432f; }
+      #mic-btn.listening { background: #922f3b; border-color: #ed6e74; }
+
+      /* On narrow screens, stack the matrix above the conversation console. */
+      @media (max-width: 760px) {
+        body { padding: 10px; }
+        #hud-layout {
+          grid-template-columns: minmax(0, 1fr);
+          grid-template-rows: minmax(260px, 43vh) minmax(260px, 1fr);
+          height: calc(100dvh - 20px);
+          min-height: 560px;
+          gap: 10px;
+        }
+        #control-panel { padding: 14px; }
+        .matrix-heading { top: 12px; left: 14px; }
+        .matrix-tools { top: 10px; right: 10px; }
+        .matrix-tools button { min-width: 46px; height: 30px; padding: 0 6px; font-size: 9px; }
+        #matrix-count { right: 14px; bottom: 12px; }
+        .matrix-category-legend { left: 14px; bottom: 32px; max-width: 68%; }
+        .matrix-help { top: 126px; right: 14px; max-width: 44%; font-size: 9px; }
+        .field-tabs { margin: 0 8px; }
+        .field-tabs .view-tab { padding: 0 3px; font-size: 7px; }
+        .field-subhead { padding: 12px 14px 10px; }
+        .memory-pages-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); grid-auto-rows: minmax(126px, auto); padding: 8px 12px; }
+        .memory-page-card { min-height: 126px; padding: 10px; }
+        .memory-page-card p { font-size: 11px; }
+        .lab-layout { grid-template-columns: 1fr; grid-template-rows: minmax(90px, 0.45fr) minmax(0, 1fr); gap: 9px; padding: 10px 12px; }
+        .lab-memory-picker { border-right: 0; border-bottom: 1px solid #1d3b43; padding: 0 0 8px; }
+      }
+
+      /* On small phones, place the two actions beside a full-height input field. */
+      @media (max-width: 420px) {
+        .input-bar { grid-template-columns: minmax(0, 1fr) 48px; }
+        #send-btn { grid-column: 2; grid-row: 1; padding: 0 8px; }
+        #mic-btn { grid-column: 2; grid-row: 2; }
+        #chat-field { grid-column: 1; grid-row: 1 / span 2; height: 100%; min-height: 44px; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { scroll-behavior: auto !important; }
+        .memory-pages-grid.is-searching .memory-page-card, .memory-page-card.search-focus { animation: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <main id="hud-layout">
+      <!-- Canvas region: nodes, connection lines, labels, and selection pulses. -->
+      <section id="matrix-panel" aria-label="Three-dimensional memory matrix">
+        <nav class="view-tabs field-tabs" role="tablist" aria-label="Memory field views">
+          <button class="view-tab field-tab" id="field-3d-tab" type="button" role="tab" aria-selected="true" aria-controls="field-view-3d">3D FIELD</button>
+          <button class="view-tab field-tab" id="field-2d-tab" type="button" role="tab" aria-selected="false" aria-controls="field-view-2d">2D PAGES</button>
+          <button class="view-tab field-tab" id="field-timeline-tab" type="button" role="tab" aria-selected="false" aria-controls="field-view-timeline">TIMELINE</button>
+          <button class="view-tab field-tab" id="field-lab-tab" type="button" role="tab" aria-selected="false" aria-controls="field-view-lab">MEMORY LAB</button>
+          <button class="view-tab field-tab" id="field-review-tab" type="button" role="tab" aria-selected="false" aria-controls="field-view-review">REVIEW <span id="field-review-count">0</span></button>
+        </nav>
+        <div class="field-stage">
+          <section id="field-view-3d" class="field-view" role="tabpanel" aria-labelledby="field-3d-tab">
+            <canvas id="canvas3d" aria-label="Interactive memory nodes"></canvas>
+            <div class="matrix-heading" aria-hidden="true">
+              <div class="eyebrow">Local memory field</div>
+              <h1>Companion Core</h1>
+              <div class="matrix-axis-note">X/Y MEMORY POSITIONS · Z CATEGORY PLANES</div>
+            </div>
+            <div class="matrix-tools" role="group" aria-label="Matrix camera controls">
+              <button id="orbit-mode" type="button" aria-pressed="true" title="Drag to rotate the matrix">ORBIT</button>
+              <button id="pan-mode" type="button" aria-pressed="false" title="Drag to move across the matrix">PAN</button>
+              <button id="reset-view" class="reset-view-button" type="button" title="Reset matrix view" aria-label="Reset matrix view">RESET</button>
+            </div>
+            <div class="matrix-category-legend" aria-label="Topic columns, ordered left to right">
+              <span><i class="category-swatch swatch-health"></i>HEALTH</span>
+              <span><i class="category-swatch swatch-work"></i>WORK</span>
+              <span><i class="category-swatch swatch-relationships"></i>PEOPLE</span>
+              <span><i class="category-swatch swatch-goals"></i>GOALS</span>
+              <span><i class="category-swatch swatch-preferences"></i>PREFERENCES</span>
+              <span><i class="category-swatch swatch-home"></i>HOME</span>
+              <span><i class="category-swatch swatch-other"></i>OTHER</span>
+            </div>
+            <div class="matrix-help">Drag in selected mode · Scroll to zoom · Click a node to select</div>
+            <div id="matrix-count" aria-live="polite">0 memory nodes</div>
+          </section>
+          <section id="field-view-2d" class="field-view" role="tabpanel" aria-labelledby="field-2d-tab" hidden>
+            <header class="field-subhead"><div><div class="field-kicker">Category pages</div><h2 id="two-d-page-title">All memories</h2></div><div id="two-d-scale" class="field-note"></div></header>
+            <nav id="category-pages" class="category-pages" role="tablist" aria-label="Memory categories"></nav>
+            <div class="page-toolbar"><span id="two-d-page-status"></span><span><button id="two-d-previous" type="button" aria-label="Previous memory page" title="Previous page">&#8592;</button> <button id="two-d-next" type="button" aria-label="Next memory page" title="Next page">&#8594;</button></span></div>
+            <div id="memory-pages-grid" class="memory-pages-grid"></div>
+          </section>
+          <section id="field-view-timeline" class="field-view" role="tabpanel" aria-labelledby="field-timeline-tab" hidden>
+            <header class="field-subhead"><div><div class="field-kicker">Memory history</div><h2>Timeline</h2></div><div id="timeline-summary" class="field-note"></div></header>
+            <div class="timeline-controls"><label for="timeline-range">Show memories through</label><output id="timeline-cutoff"></output><input id="timeline-range" type="range" min="0" max="100" value="100" /></div>
+            <div id="timeline-graph" class="timeline-graph" aria-label="Memory activity by month"></div>
+            <div id="timeline-list" class="timeline-list"></div>
+          </section>
+          <section id="field-view-lab" class="field-view" role="tabpanel" aria-labelledby="field-lab-tab" hidden>
+            <header class="field-subhead"><div><div class="field-kicker">Isolated experiments</div><h2>Memory Lab</h2></div><div class="field-note">Experiments never write to saved memory</div></header>
+            <div class="lab-layout">
+              <section class="lab-memory-picker" aria-label="Choose experimental memory context"><h3>Temporary context</h3><div id="lab-memory-list"></div></section>
+              <section class="lab-workspace"><label for="lab-prompt" class="field-kicker">Test input</label><textarea id="lab-prompt" maxlength="4096" placeholder="Try a question or personal detail without changing saved memory"></textarea><div class="lab-actions"><button id="lab-run" type="button">RUN WITH SELECTED</button><button id="lab-compare" type="button">COMPARE WITH NONE</button><button id="lab-clear" type="button" title="Clear temporary prompt and outputs">CLEAR</button></div><div id="lab-results" class="lab-results" aria-live="polite"><div class="field-note">Choose memories and enter a test input to compare behavior.</div></div></section>
+            </div>
+          </section>
+          <section id="field-view-review" class="field-view" role="tabpanel" aria-labelledby="field-review-tab" hidden>
+            <header class="field-subhead"><div><div class="field-kicker">Memory safety</div><h2>Review queue</h2></div><div id="field-review-summary" class="field-note"></div></header>
+            <div id="field-review-empty" class="field-note" style="padding:18px" hidden>No pending proposals. Enable “Review new saves” in Settings to queue future memories.</div>
+            <div id="field-review-primary-list" class="primary-review-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <!-- Conversation region: service state, streamed text, and text/voice controls. -->
+      <section id="control-panel" aria-label="Conversation and memory controls">
+        <header class="panel-head">
+          <div>
+            <h2>Conversation</h2>
+            <div id="action-tag" aria-live="polite">Ready</div>
+          </div>
+          <div id="network-tag" role="status">CONNECTING</div>
+        </header>
+        <nav class="view-tabs" role="tablist" aria-label="Console view">
+          <button class="view-tab" id="chat-tab" type="button" role="tab" aria-selected="true" aria-controls="chat-view">CHAT</button>
+          <button class="view-tab" id="nodes-tab" type="button" role="tab" aria-selected="false" aria-controls="nodes-view">NODES <span id="tab-node-count">0</span></button>
+          <button class="view-tab" id="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="settings-view">SETTINGS</button>
+        </nav>
+        <div id="chat-view" class="panel-view" role="tabpanel" aria-labelledby="chat-tab">
+          <div class="conversation-tools">
+            <button id="save-conversation" type="button" title="Save a compact copy of this conversation in this browser">SAVE CHAT</button>
+            <button id="toggle-archives" type="button" aria-expanded="false" aria-controls="conversation-archive">PAST CHATS</button>
+            <button id="return-live-chat" type="button" hidden>RETURN TO LIVE</button>
+            <span id="archive-state" aria-live="polite"></span>
+          </div>
+          <div id="conversation-archive" class="conversation-archive" aria-label="Saved conversations" hidden></div>
+          <div id="console-log" role="log" aria-live="polite">Waiting for local companion…</div>
+          <section id="voice-preview" class="voice-preview" aria-label="Live voice input" hidden>
+            <div class="voice-preview-head"><span id="voice-preview-status">Waiting for speech</span><span id="voice-recording-time">00:00</span></div>
+            <div class="voice-level-track" role="meter" aria-label="Microphone input level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="voice-level-fill" class="voice-level-fill"></div></div>
+            <div id="voice-transcript" class="voice-transcript empty" aria-live="polite">Speak naturally; a local transcript preview will appear here.</div>
+          </section>
+          <form class="input-bar" id="chat-form">
+            <input id="chat-field" type="text" placeholder="Write a thought or question" autocomplete="off" />
+            <button id="send-btn" type="submit" title="Send text">SEND</button>
+            <button id="mic-btn" type="button" title="Speak to the companion" aria-label="Start voice input">VOICE</button>
+          </form>
+        </div>
+        <section id="nodes-view" class="panel-view" role="tabpanel" aria-labelledby="nodes-tab" hidden>
+          <div class="memory-toolbar">
+            <div id="selection-count" aria-live="polite">No nodes selected</div>
+            <button id="delete-selected" type="button" disabled>DELETE SELECTED</button>
+            <button id="clear-all" type="button">CLEAR ALL</button>
+          </div>
+          <section id="memory-review" class="memory-review" aria-label="Pending memory approvals" hidden>
+            <h3>Pending approval</h3>
+            <div id="memory-review-list"></div>
+          </section>
+          <div id="memory-list" aria-label="Saved memory nodes"></div>
+        </section>
+        <section id="settings-view" class="panel-view" role="tabpanel" aria-labelledby="settings-tab" hidden>
+          <details class="settings-group">
+            <summary>Matrix motion</summary>
+            <label class="setting-row"><span>Idle orbit<small>Pause while the pointer is over the matrix or recently active.</small></span><input id="setting-idle-orbit" type="checkbox" /></label>
+            <label class="setting-row setting-range"><span>Orbit speed</span><span><input id="setting-orbit-speed" type="range" min="1" max="10" step="1" /><output id="setting-orbit-speed-value" class="setting-value"></output></span></label>
+            <label class="setting-row setting-range"><span>Resume after</span><span><input id="setting-orbit-delay" type="range" min="1" max="8" step="1" /><output id="setting-orbit-delay-value" class="setting-value"></output></span></label>
+          </details>
+          <details class="settings-group">
+            <summary>Matrix visibility</summary>
+            <label class="setting-row"><span>Depth fog<small>Softens distant lattice lines without dimming labels.</small></span><input id="setting-fog" type="checkbox" /></label>
+            <label class="setting-row setting-range"><span>Fog strength</span><span><input id="setting-fog-strength" type="range" min="0" max="75" step="5" /><output id="setting-fog-strength-value" class="setting-value"></output></span></label>
+            <label class="setting-row setting-range"><span>Text brightness</span><span><input id="setting-text-brightness" type="range" min="80" max="140" step="5" /><output id="setting-text-brightness-value" class="setting-value"></output></span></label>
+          </details>
+          <details class="settings-group">
+            <summary>Memory behavior</summary>
+            <label class="setting-row"><span>Review new saves<small>Queue new memories and follow-ups for approval before they are written.</small></span><input id="setting-review-memories" type="checkbox" /></label>
+          </details>
+          <details class="settings-group">
+            <summary>Voice &amp; speech</summary>
+            <label class="setting-row"><span>Speak typed replies aloud<small>Uses the browser's installed voice. Voice-input replies are already spoken.</small></span><input id="setting-speak-text-replies" type="checkbox" /></label>
+            <label class="setting-row"><span>Wake phrase listening<small>Keep the microphone active in this tab. Audio is analyzed locally; this turns off when the page reloads.</small></span><input id="setting-wake-enable" type="checkbox" /></label>
+            <label class="setting-row setting-text"><span>Wake phrase</span><input id="setting-wake-phrase" type="text" maxlength="40" autocomplete="off" /></label>
+            <label class="setting-row setting-range"><span>Wake check interval<small>Shorter checks respond sooner but use more CPU.</small></span><span><input id="setting-wake-interval" type="range" min="4" max="10" step="1" /><output id="setting-wake-interval-value" class="setting-value"></output></span></label>
+          </details>
+          <details class="settings-group">
+            <summary>Color</summary>
+            <label class="setting-row setting-color"><span>App primary color<small>Buttons, selected tabs, and interface accents.</small></span><input id="setting-app-color" type="color" aria-label="App primary color" /></label>
+            <label class="setting-row setting-color"><span>Grid color<small>Matrix lattice and scan plane.</small></span><input id="setting-grid-color" type="color" aria-label="Grid color" /></label>
+          </details>
+        </section>
+      </section>
+    </main>
+
+    <div id="bulk-delete-dialog" class="dialog-backdrop" hidden>
+      <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="bulk-delete-title" aria-describedby="bulk-delete-summary">
+        <h2 id="bulk-delete-title">Confirm bulk deletion</h2>
+        <p id="bulk-delete-summary"></p>
+        <label for="bulk-delete-phrase">Type <code id="bulk-delete-required-phrase"></code> exactly:</label>
+        <input id="bulk-delete-phrase" type="text" autocomplete="off" />
+        <div id="bulk-delete-error" class="dialog-error" aria-live="polite"></div>
+        <div class="dialog-actions">
+          <button id="cancel-bulk-delete" type="button">CANCEL</button>
+          <button id="confirm-bulk-delete" type="submit" form="bulk-delete-form" disabled>DELETE</button>
+        </div>
+        <form id="bulk-delete-form"></form>
+      </section>
+    </div>
+
+    <script>
+      // Cache page elements, store rendered nodes by ID, and connect to this page's server.
+      const canvas = document.getElementById("canvas3d");
+      const matrixPanel = document.getElementById("matrix-panel");
+      const fieldViews = {
+        "3d": document.getElementById("field-view-3d"),
+        "2d": document.getElementById("field-view-2d"),
+        timeline: document.getElementById("field-view-timeline"),
+        lab: document.getElementById("field-view-lab"),
+        review: document.getElementById("field-view-review"),
+      };
+      const fieldTabs = [...document.querySelectorAll(".field-tab")];
+      const categoryPages = document.getElementById("category-pages");
+      const twoDPageTitle = document.getElementById("two-d-page-title");
+      const twoDScale = document.getElementById("two-d-scale");
+      const twoDPageStatus = document.getElementById("two-d-page-status");
+      const twoDPreviousButton = document.getElementById("two-d-previous");
+      const twoDNextButton = document.getElementById("two-d-next");
+      const memoryPagesGrid = document.getElementById("memory-pages-grid");
+      const timelineRange = document.getElementById("timeline-range");
+      const timelineCutoff = document.getElementById("timeline-cutoff");
+      const timelineSummary = document.getElementById("timeline-summary");
+      const timelineGraph = document.getElementById("timeline-graph");
+      const timelineList = document.getElementById("timeline-list");
+      const labMemoryList = document.getElementById("lab-memory-list");
+      const labPrompt = document.getElementById("lab-prompt");
+      const labRunButton = document.getElementById("lab-run");
+      const labCompareButton = document.getElementById("lab-compare");
+      const labClearButton = document.getElementById("lab-clear");
+      const labResults = document.getElementById("lab-results");
+      const context = canvas.getContext("2d");
+      const consoleLog = document.getElementById("console-log");
+      const saveConversationButton = document.getElementById("save-conversation");
+      const toggleArchivesButton = document.getElementById("toggle-archives");
+      const returnLiveChatButton = document.getElementById("return-live-chat");
+      const archiveState = document.getElementById("archive-state");
+      const conversationArchive = document.getElementById("conversation-archive");
+      const networkTag = document.getElementById("network-tag");
+      const actionTag = document.getElementById("action-tag");
+      const chatField = document.getElementById("chat-field");
+      const chatForm = document.getElementById("chat-form");
+      const sendButton = document.getElementById("send-btn");
+      const micButton = document.getElementById("mic-btn");
+      const voicePreview = document.getElementById("voice-preview");
+      const voicePreviewStatus = document.getElementById("voice-preview-status");
+      const voiceRecordingTime = document.getElementById("voice-recording-time");
+      const voiceLevelTrack = document.querySelector(".voice-level-track");
+      const voiceLevelFill = document.getElementById("voice-level-fill");
+      const voiceTranscript = document.getElementById("voice-transcript");
+      const matrixCount = document.getElementById("matrix-count");
+      const tabNodeCount = document.getElementById("tab-node-count");
+      const chatTab = document.getElementById("chat-tab");
+      const nodesTab = document.getElementById("nodes-tab");
+      const settingsTab = document.getElementById("settings-tab");
+      const chatView = document.getElementById("chat-view");
+      const nodesView = document.getElementById("nodes-view");
+      const settingsView = document.getElementById("settings-view");
+      const memoryList = document.getElementById("memory-list");
+      const selectionCount = document.getElementById("selection-count");
+      const deleteSelectedButton = document.getElementById("delete-selected");
+      const clearAllButton = document.getElementById("clear-all");
+      const reviewQueue = [];
+      const memoryReviewSection = document.getElementById("memory-review");
+      const memoryReviewList = document.getElementById("memory-review-list");
+      const fieldReviewList = document.getElementById("field-review-primary-list");
+      const fieldReviewCount = document.getElementById("field-review-count");
+      const fieldReviewSummary = document.getElementById("field-review-summary");
+      const fieldReviewEmpty = document.getElementById("field-review-empty");
+      const reviewMemoriesInput = document.getElementById("setting-review-memories");
+      const expandedMemoryIDs = new Set();
+      const orbitModeButton = document.getElementById("orbit-mode");
+      const panModeButton = document.getElementById("pan-mode");
+      const resetViewButton = document.getElementById("reset-view");
+      const idleOrbitInput = document.getElementById("setting-idle-orbit");
+      const orbitSpeedInput = document.getElementById("setting-orbit-speed");
+      const orbitSpeedValue = document.getElementById("setting-orbit-speed-value");
+      const orbitDelayInput = document.getElementById("setting-orbit-delay");
+      const orbitDelayValue = document.getElementById("setting-orbit-delay-value");
+      const fogInput = document.getElementById("setting-fog");
+      const fogStrengthInput = document.getElementById("setting-fog-strength");
+      const fogStrengthValue = document.getElementById("setting-fog-strength-value");
+      const textBrightnessInput = document.getElementById("setting-text-brightness");
+      const textBrightnessValue = document.getElementById("setting-text-brightness-value");
+      const appColorInput = document.getElementById("setting-app-color");
+      const gridColorInput = document.getElementById("setting-grid-color");
+      const speakTextRepliesInput = document.getElementById("setting-speak-text-replies");
+      const wakeEnableInput = document.getElementById("setting-wake-enable");
+      const wakePhraseInput = document.getElementById("setting-wake-phrase");
+      const wakeIntervalInput = document.getElementById("setting-wake-interval");
+      const wakeIntervalValue = document.getElementById("setting-wake-interval-value");
+      const bulkDeleteDialog = document.getElementById("bulk-delete-dialog");
+      const bulkDeleteSummary = document.getElementById("bulk-delete-summary");
+      const bulkDeleteRequiredPhrase = document.getElementById("bulk-delete-required-phrase");
+      const bulkDeletePhrase = document.getElementById("bulk-delete-phrase");
+      const bulkDeleteError = document.getElementById("bulk-delete-error");
+      const confirmBulkDeleteButton = document.getElementById("confirm-bulk-delete");
+      const cancelBulkDeleteButton = document.getElementById("cancel-bulk-delete");
+      const bulkDeleteForm = document.getElementById("bulk-delete-form");
+      const nodes = new Map();
+      const selectedIDs = new Set();
+      const labSelectedIDs = new Set();
+      const categoryOrder = ["health", "work", "relationships", "goals", "preferences", "home", "other"];
+      const conversationArchiveKey = "companion-conversation-archive";
+      const maxArchivedConversations = 5;
+      const maxArchivedTranscriptLength = 6000;
+      let archivedConversations = loadConversationArchive();
+      let liveTranscript = "Waiting for local companion…";
+      let viewingArchiveID = "";
+      let liveMicDisabledBeforeArchive = false;
+      const savedNavigation = (() => {
+        try {
+          return JSON.parse(localStorage.getItem("companion-navigation") || "{}");
+        } catch {
+          return {};
+        }
+      })();
+      let activeConsoleView = ["chat", "nodes", "settings"].includes(savedNavigation.consoleView) ? savedNavigation.consoleView : "chat";
+      let activeFieldView = Object.hasOwn(fieldViews, savedNavigation.fieldView) ? savedNavigation.fieldView : "3d";
+      let activeCategoryPage = savedNavigation.categoryPage === "all" || categoryOrder.includes(savedNavigation.categoryPage) ? savedNavigation.categoryPage : "all";
+      let memoryPageIndex = Number.isSafeInteger(savedNavigation.pageIndex) && savedNavigation.pageIndex >= 0 ? savedNavigation.pageIndex : 0;
+      let memoryRestoreComplete = false;
+      const memoriesPerPage = 6;
+      let timelineWasFiltered = false;
+      const host = window.location.host || "localhost:8080";
+      const socketProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const socket = new WebSocket(`${socketProtocol}//${host}/ws/stream`);
+
+      // Camera, pointer, response, and speech state persist between animation frames.
+      let cameraX = 0.4;
+      let cameraY = -0.5;
+      let zoom = 1;
+      let panX = 0;
+      let panY = 0;
+      let cameraMode = "orbit";
+      let matrixScale = matrixScaleForCount(nodes.size);
+      let targetMatrixScale = matrixScale;
+      let animationPhase = 0;
+      let idleOrbit = 0;
+      const settingDefaults = { idleOrbit: true, orbitSpeed: 4, orbitDelay: 3, fog: true, fogStrength: 35, textBrightness: 115, appColor: "#1b625b", gridColor: "#78a0aa", speakTextReplies: false, wakePhrase: "Companion", wakeIntervalSeconds: 6, reviewNewMemories: false };
+      let matrixSettings = { ...settingDefaults };
+      try {
+        matrixSettings = { ...settingDefaults, ...JSON.parse(localStorage.getItem("companion-matrix-settings") || "{}") };
+      } catch {
+        matrixSettings = { ...settingDefaults };
+      }
+      for (const key of ["appColor", "gridColor"]) {
+        if (!/^#[0-9a-f]{6}$/i.test(matrixSettings[key])) matrixSettings[key] = settingDefaults[key];
+      }
+      if (typeof matrixSettings.wakePhrase !== "string" || !matrixSettings.wakePhrase.trim()) matrixSettings.wakePhrase = settingDefaults.wakePhrase;
+      let lastCameraInteraction = performance.now();
+      let pointerOverMatrix = false;
+      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      let dragging = false;
+      let pointerMoved = false;
+      let lastPointer = { x: 0, y: 0 };
+      let pendingMode = "text";
+      let responseActive = false;
+      let speechBuffer = "";
+      let pulse = null;
+      let searchAnimation = null;
+      let memorySearchTimer = null;
+
+      function inferCategory(text) {
+        const lower = text.toLowerCase();
+        const groups = {
+          health: ["health", "doctor", "sleep", "tired", "pain", "exercise", "appointment"],
+          work: ["work", "job", "meeting", "project", "deadline", "boss", "shift"],
+          relationships: ["friend", "partner", "family", "mother", "father", "relationship"],
+          goals: ["goal", "plan", "learn", "practice", "finish", "want to", "trying to"],
+          preferences: ["prefer", "favorite", "like", "dislike", "enjoy"],
+          home: ["home", "house", "apartment", "room", "car", "repair"],
+        };
+        for (const [category, terms] of Object.entries(groups)) {
+          if (terms.some((term) => lower.includes(term))) return category;
+        }
+        return "other";
+      }
+
+      function matrixScaleForCount(count) {
+        return Math.min(2.4, 1 + Math.log2(count + 1) * 0.18);
+      }
+
+      function categoriesWithMemories() {
+        const present = new Set([...nodes.values()].map((node) => node.category || "other"));
+        return [
+          ...categoryOrder.filter((category) => present.has(category)),
+          ...[...present].filter((category) => !categoryOrder.includes(category)).sort(),
+        ];
+      }
+
+      function categoryPlanePositions(categories) {
+        const spacing = Math.min(72, 240 / Math.max(1, categories.length - 1));
+        return new Map(categories.map((category, index) => [category, (index - (categories.length - 1) / 2) * spacing]));
+      }
+
+      // Place each category on its own depth plane and arrange its memories in age order.
+      function layoutNodes() {
+        const currentNodes = [...nodes.values()];
+        targetMatrixScale = matrixScaleForCount(currentNodes.length);
+        if (currentNodes.length === 0) return;
+
+        const categoryGroups = new Map();
+        currentNodes.forEach((node) => {
+          const categoryKey = node.category || "other";
+          if (!categoryGroups.has(categoryKey)) categoryGroups.set(categoryKey, []);
+          categoryGroups.get(categoryKey).push(node);
+        });
+
+        const categoriesInUse = categoriesWithMemories();
+        const planePositions = categoryPlanePositions(categoriesInUse);
+        for (const [categoryKey, cellNodes] of categoryGroups.entries()) {
+          cellNodes.sort((first, second) => Date.parse(first.timestamp) - Date.parse(second.timestamp));
+          const columns = Math.ceil(Math.sqrt(cellNodes.length));
+          const rows = Math.ceil(cellNodes.length / columns);
+          const horizontalSpacing = Math.min(140, 500 / Math.max(1, columns - 1));
+          const verticalSpacing = Math.min(70, 150 / Math.max(1, rows - 1));
+          cellNodes.forEach((node, index) => {
+            const column = index % columns;
+            const row = Math.floor(index / columns);
+            node.x = (column - (columns - 1) / 2) * horizontalSpacing;
+            node.y = (row - (rows - 1) / 2) * verticalSpacing;
+            node.z = planePositions.get(categoryKey) ?? 0;
+          });
+        }
+      }
+
+      // Add or refresh a node, update its semantic metadata, and pulse its grid location.
+      function addOrUpdateNode(packet, updated = false, highlight = true) {
+        const key = packet.id || `legacy-${packet.content}`;
+        let node = nodes.get(key);
+        if (!node) {
+          node = { id: key, content: packet.content, scale: 1, match: false };
+          nodes.set(key, node);
+        }
+        node.content = packet.content;
+        if (categoryOrder.includes(packet.category) && packet.category !== "other") {
+          node.category = packet.category;
+        } else if (!node.category || node.category === "other") {
+          node.category = inferCategory(packet.content);
+        }
+        if (["low", "medium", "high"].includes(packet.importance)) {
+          node.importance = packet.importance;
+        } else if (!node.importance) {
+          node.importance = "medium";
+        }
+        node.timestamp = packet.timestamp || node.timestamp || new Date().toISOString();
+        node.relatedIDs = Array.isArray(packet.related_ids) ? packet.related_ids : node.relatedIDs || [];
+        node.reason = packet.reason || node.reason || (packet.type === "restore_node" ? "Loaded from the local store; original save rationale is unavailable." : "Saved as durable personal information.");
+        if (Number.isFinite(packet.score)) node.lastRetrievalScore = packet.score;
+        node.match = highlight;
+        node.scale = highlight ? (updated ? 3.8 : 3.2) : 1;
+        layoutNodes();
+        pulse = { x: node.x, y: node.y, z: node.z, radius: 0 };
+        if (highlight) {
+          for (const other of nodes.values()) {
+            if (other !== node) other.match = false;
+          }
+        }
+        updateCount();
+        renderMemoryManager();
+      }
+
+      // Keep both node counters synchronized with the in-memory map.
+      function updateCount() {
+        const count = nodes.size;
+        targetMatrixScale = matrixScaleForCount(count);
+        matrixCount.innerHTML = `${count} memory node${count === 1 ? "" : "s"} · <span>${targetMatrixScale.toFixed(1)}× field</span>`;
+        tabNodeCount.textContent = count;
+        refreshFieldView();
+      }
+
+      function saveNavigationState() {
+        localStorage.setItem("companion-navigation", JSON.stringify({
+          consoleView: activeConsoleView,
+          fieldView: activeFieldView,
+          categoryPage: activeCategoryPage,
+          pageIndex: memoryPageIndex,
+        }));
+      }
+
+      function showFieldView(view) {
+        if (!Object.hasOwn(fieldViews, view)) return;
+        activeFieldView = view;
+        for (const [name, element] of Object.entries(fieldViews)) element.hidden = name !== view;
+        for (const tab of fieldTabs) tab.setAttribute("aria-selected", String(tab.id === `field-${view === "timeline" ? "timeline" : view}-tab`));
+        if (view === "2d") renderMemoryPages();
+        if (view === "timeline") renderTimeline();
+        if (view === "lab") renderLabMemoryPicker();
+        if (view === "review") renderMemoryReviewQueue();
+        saveNavigationState();
+      }
+
+      function refreshFieldView() {
+        if (activeFieldView === "2d") renderMemoryPages();
+        if (activeFieldView === "timeline") renderTimeline();
+        if (activeFieldView === "lab") renderLabMemoryPicker();
+      }
+
+      function clearMemorySearch() {
+        if (memorySearchTimer !== null) window.clearInterval(memorySearchTimer);
+        memorySearchTimer = null;
+        searchAnimation = null;
+      }
+
+      function getCategoryMemoryNodes() {
+        const categoryNodes = [...nodes.values()].filter((node) => activeCategoryPage === "all" || node.category === activeCategoryPage);
+        categoryNodes.sort((first, second) => {
+          const importance = { high: 0, medium: 1, low: 2 };
+          return (importance[first.importance] ?? 1) - (importance[second.importance] ?? 1) || Date.parse(second.timestamp) - Date.parse(first.timestamp);
+        });
+        return categoryNodes;
+      }
+
+      function advanceMemorySearchPage() {
+        if (!searchAnimation?.running) return;
+        const categoryNodes = getCategoryMemoryNodes();
+        const pageCount = Math.max(1, Math.ceil(categoryNodes.length / memoriesPerPage));
+        if (pageCount > 1) memoryPageIndex = (memoryPageIndex + 1) % pageCount;
+        const visibleIDs = new Set(categoryNodes.slice(memoryPageIndex * memoriesPerPage, (memoryPageIndex + 1) * memoriesPerPage).map((node) => node.id));
+        const visibleCandidates = searchAnimation.candidates.map((candidate) => candidate.id).filter((id) => visibleIDs.has(id));
+        if (visibleCandidates.length) {
+          searchAnimation.focusedID = visibleCandidates[searchAnimation.focusIndex % visibleCandidates.length];
+          searchAnimation.focusIndex += 1;
+        } else {
+          searchAnimation.focusedID = "";
+        }
+        renderMemoryPages();
+      }
+
+      function renderMemoryPages() {
+        const categoryNodes = getCategoryMemoryNodes();
+        const pageCount = Math.max(1, Math.ceil(categoryNodes.length / memoriesPerPage));
+        memoryPageIndex = Math.max(0, memoryPageIndex);
+        if (memoryRestoreComplete) memoryPageIndex = Math.min(memoryPageIndex, pageCount - 1);
+        let pageNodes = categoryNodes.slice(memoryPageIndex * memoriesPerPage, (memoryPageIndex + 1) * memoriesPerPage);
+        if (searchAnimation && searchAnimation.candidates.length && pageNodes.length > 0) {
+          const activeSearchIDs = new Set(searchAnimation.candidates.map((candidate) => candidate.id));
+          pageNodes = [...pageNodes].sort((first, second) => {
+            const firstScore = activeSearchIDs.has(first.id) ? 0 : 1;
+            const secondScore = activeSearchIDs.has(second.id) ? 0 : 1;
+            return firstScore - secondScore;
+          });
+        }
+        twoDPageTitle.textContent = activeCategoryPage === "all" ? "All memories" : `${activeCategoryPage[0].toUpperCase()}${activeCategoryPage.slice(1)}`;
+        twoDScale.textContent = `${nodes.size} nodes · ${targetMatrixScale.toFixed(1)}× field`;
+        const searchLabel = searchAnimation?.running ? "SEARCHING" : searchAnimation?.finished ? (searchAnimation.resultID ? "MATCH FOUND" : "NO MATCH") : "";
+        twoDPageStatus.textContent = categoryNodes.length ? `${searchLabel ? `${searchLabel} · ` : ""}PAGE ${memoryPageIndex + 1} / ${pageCount} · ${categoryNodes.length} ENTRIES` : searchAnimation?.running ? "SEARCHING MEMORY FIELD" : "NO ENTRIES IN THIS PAGE";
+        memoryPagesGrid.classList.toggle("is-searching", Boolean(searchAnimation?.running));
+        twoDPreviousButton.disabled = memoryPageIndex === 0;
+        twoDNextButton.disabled = memoryPageIndex >= pageCount - 1;
+
+        categoryPages.replaceChildren();
+        const categories = [{ id: "all", label: "ALL", count: nodes.size }, ...categoryOrder.map((category) => ({
+          id: category,
+          label: category === "relationships" ? "PEOPLE" : category.toUpperCase(),
+          count: [...nodes.values()].filter((node) => node.category === category).length,
+        })).filter((category) => category.count > 0)];
+        for (const category of categories) {
+          const tab = document.createElement("button");
+          tab.type = "button";
+          tab.className = "category-page-button";
+          tab.setAttribute("role", "tab");
+          tab.setAttribute("aria-selected", String(activeCategoryPage === category.id));
+          tab.textContent = `${category.label} ${category.count}`;
+          tab.addEventListener("click", () => {
+            clearMemorySearch();
+            activeCategoryPage = category.id;
+            memoryPageIndex = 0;
+            saveNavigationState();
+            renderMemoryPages();
+          });
+          categoryPages.append(tab);
+        }
+
+        memoryPagesGrid.replaceChildren();
+        const activeSearchIDs = new Set((searchAnimation?.candidates || []).map((candidate) => candidate.id));
+        for (let index = 0; index < Math.max(pageNodes.length, 1); index += 1) {
+          const node = pageNodes[index];
+          const card = document.createElement("button");
+          card.type = "button";
+          card.className = "memory-page-card";
+          if (node) {
+            card.dataset.importance = node.importance || "medium";
+            if (activeSearchIDs.has(node.id)) card.classList.add("search-highlight");
+            if (searchAnimation?.focusedID === node.id) card.classList.add("search-focus");
+            card.style.setProperty("--tile-index", String(index));
+            const categoryLabel = document.createElement("span");
+            categoryLabel.className = "memory-page-category";
+            categoryLabel.textContent = node.category === "relationships" ? "PEOPLE" : (node.category || "other").toUpperCase();
+            const content = document.createElement("p");
+            content.textContent = (node.content || "").replace(/\s+/g, " ").trim() || "Empty memory";
+            const meta = document.createElement("span");
+            meta.className = "memory-page-meta";
+            const date = new Date(node.timestamp);
+            const dateLabel = Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+            meta.textContent = [node.importance || "medium", dateLabel].filter(Boolean).join(" · ");
+            card.title = node.content;
+            card.append(categoryLabel, content, meta);
+            card.addEventListener("click", () => {
+              selectedIDs.add(node.id);
+              node.match = true;
+              renderMemoryManager();
+              updateSelectionControls();
+            });
+          } else {
+            card.style.visibility = "hidden";
+            card.disabled = true;
+          }
+          memoryPagesGrid.append(card);
+        }
+        if (!pageNodes.length) {
+          const empty = document.createElement("div");
+          empty.className = "field-note";
+          empty.textContent = "Memories in this category will appear here.";
+          memoryPagesGrid.append(empty);
+        }
+      }
+
+      function renderTimeline() {
+        const chronological = [...nodes.values()].sort((first, second) => Date.parse(first.timestamp) - Date.parse(second.timestamp));
+        const previousMax = Number(timelineRange.max) || 1;
+        const parsedValue = Number(timelineRange.value);
+        const previousValue = Number.isFinite(parsedValue) ? parsedValue : previousMax;
+        const includeNewItems = !timelineWasFiltered || previousValue >= previousMax;
+        timelineRange.max = String(Math.max(1, chronological.length));
+        const cutoffIndex = chronological.length ? (includeNewItems ? chronological.length : Math.max(0, Math.min(previousValue, chronological.length))) : 0;
+        timelineRange.value = String(cutoffIndex);
+        const visible = chronological.slice(0, cutoffIndex);
+        timelineCutoff.textContent = visible.length ? new Date(visible[visible.length - 1].timestamp).toLocaleDateString() : "No memories";
+        timelineSummary.textContent = `${visible.length} / ${chronological.length} memories`;
+
+        const monthCounts = new Map();
+        for (const node of visible) {
+          const date = new Date(node.timestamp);
+          const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+          monthCounts.set(month, (monthCounts.get(month) || 0) + 1);
+        }
+        const months = [...monthCounts.entries()].slice(-24);
+        const maxMonthCount = Math.max(1, ...months.map(([, count]) => count));
+        timelineGraph.replaceChildren();
+        for (const [month, count] of months) {
+          const bar = document.createElement("span");
+          bar.className = "timeline-bar";
+          bar.style.height = `${Math.max(4, count / maxMonthCount * 100)}%`;
+          bar.title = `${month}: ${count} ${count === 1 ? "memory" : "memories"}`;
+          timelineGraph.append(bar);
+        }
+
+        timelineList.replaceChildren();
+        for (const node of [...visible].reverse()) {
+          const row = document.createElement("article");
+          row.className = "timeline-entry";
+          const date = document.createElement("time");
+          date.className = "timeline-date";
+          date.dateTime = node.timestamp;
+          date.textContent = new Date(node.timestamp).toLocaleDateString();
+          const content = document.createElement("p");
+          content.textContent = node.content;
+          row.append(date, content);
+          timelineList.append(row);
+        }
+      }
+
+      function renderLabMemoryPicker() {
+        labMemoryList.replaceChildren();
+        if (nodes.size === 0) {
+          const empty = document.createElement("div");
+          empty.className = "field-note";
+          empty.textContent = "No saved memories to use as temporary context.";
+          labMemoryList.append(empty);
+          return;
+        }
+        const ordered = [...nodes.values()].sort((first, second) => Date.parse(second.timestamp) - Date.parse(first.timestamp));
+        for (const node of ordered) {
+          const label = document.createElement("label");
+          label.className = "lab-memory-option";
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = labSelectedIDs.has(node.id);
+          checkbox.addEventListener("change", () => {
+            if (checkbox.checked) labSelectedIDs.add(node.id);
+            else labSelectedIDs.delete(node.id);
+          });
+          const content = document.createElement("span");
+          content.textContent = `${node.category} · ${node.content}`;
+          label.append(checkbox, content);
+          labMemoryList.append(label);
+        }
+      }
+
+      function selectedLabMemories() {
+        return [...labSelectedIDs].map((id) => nodes.get(id)).filter(Boolean).slice(0, 5).map((node) => ({
+          id: node.id,
+          content: node.content,
+          category: node.category,
+          importance: node.importance,
+        }));
+      }
+
+      function renderMemoryManager() {
+        memoryList.replaceChildren();
+        const orderedNodes = [...nodes.values()].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+        if (orderedNodes.length === 0) {
+          const emptyMessage = document.createElement("div");
+          emptyMessage.className = "empty-memory-list";
+          emptyMessage.textContent = "No saved memory nodes.";
+          memoryList.append(emptyMessage);
+        }
+
+        for (const node of orderedNodes) {
+          const row = document.createElement("article");
+          row.className = "memory-row";
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.setAttribute("aria-label", `Select memory: ${node.content.slice(0, 60)}`);
+          checkbox.dataset.memoryId = node.id;
+          checkbox.checked = selectedIDs.has(node.id);
+          checkbox.addEventListener("change", () => {
+            if (checkbox.checked) selectedIDs.add(node.id);
+            else selectedIDs.delete(node.id);
+            node.match = checkbox.checked;
+            updateSelectionControls();
+          });
+
+          const copy = document.createElement("span");
+          const content = document.createElement("span");
+          content.className = "memory-content";
+          content.textContent = node.content;
+          const meta = document.createElement("span");
+          meta.className = "memory-meta";
+          const date = new Date(node.timestamp).toLocaleDateString();
+          const relationText = node.relatedIDs.length ? ` · ${node.relatedIDs.length} linked` : " · no links";
+          meta.textContent = `${node.category} · ${node.importance} · ${date}${relationText}`;
+          copy.append(content, meta);
+          const detailButton = document.createElement("button");
+          detailButton.type = "button";
+          detailButton.className = "memory-detail-button";
+          detailButton.textContent = "WHY";
+          detailButton.setAttribute("aria-expanded", String(expandedMemoryIDs.has(node.id)));
+          detailButton.addEventListener("click", () => {
+            if (expandedMemoryIDs.has(node.id)) expandedMemoryIDs.delete(node.id);
+            else expandedMemoryIDs.add(node.id);
+            renderMemoryManager();
+          });
+          const details = document.createElement("div");
+          details.className = "memory-details";
+          details.hidden = !expandedMemoryIDs.has(node.id);
+          const relationNames = node.relatedIDs.map((id) => nodes.get(id)?.content).filter(Boolean);
+          const scoreText = Number.isFinite(node.lastRetrievalScore) ? `Approximate retrieval match: ${(node.lastRetrievalScore * 100).toFixed(0)}%.` : "This entry has not been used in a memory recall yet.";
+          const explanation = document.createElement("div");
+          explanation.textContent = `${node.reason} Added ${new Date(node.timestamp).toLocaleString()}. ${scoreText}${relationNames.length ? ` Related: ${relationNames.join(" · ")}` : " No linked memories."}`;
+          const editor = document.createElement("textarea");
+          editor.className = "memory-edit-input";
+          editor.setAttribute("aria-label", `Edit memory: ${node.content.slice(0, 60)}`);
+          editor.value = node.content;
+          const detailActions = document.createElement("div");
+          detailActions.className = "memory-detail-actions";
+          const saveEdit = document.createElement("button");
+          saveEdit.type = "button";
+          saveEdit.textContent = "SAVE EDIT";
+          saveEdit.addEventListener("click", () => {
+            const replacement = editor.value.trim();
+            if (!replacement || replacement === node.content) return;
+            if (!window.confirm("Replace this saved memory with the edited text?")) return;
+            socket.send(JSON.stringify({ confirm_action: "EDIT_MEMORY", id: node.id, text: replacement }));
+          });
+          const forget = document.createElement("button");
+          forget.type = "button";
+          forget.className = "forget-memory-button";
+          forget.textContent = "FORGET";
+          forget.addEventListener("click", () => {
+            if (window.confirm(`Permanently forget this memory?\n\n${node.content}`)) {
+              socket.send(JSON.stringify({ confirm_action: "DELETE", id: node.id }));
+            }
+          });
+          detailActions.append(saveEdit, forget);
+          details.append(explanation, editor, detailActions);
+          row.append(checkbox, copy, detailButton, details);
+          memoryList.append(row);
+        }
+        updateSelectionControls();
+        renderMemoryReviewQueue();
+      }
+
+      function renderMemoryReviewQueue() {
+        memoryReviewList.replaceChildren();
+        fieldReviewList.replaceChildren();
+        memoryReviewSection.hidden = reviewQueue.length === 0;
+        fieldReviewCount.textContent = String(reviewQueue.length);
+        fieldReviewSummary.textContent = `${reviewQueue.length} proposal${reviewQueue.length === 1 ? "" : "s"} awaiting approval`;
+        fieldReviewEmpty.hidden = reviewQueue.length > 0;
+        for (const proposal of reviewQueue) {
+          memoryReviewList.append(createReviewProposalCard(proposal));
+          fieldReviewList.append(createReviewProposalCard(proposal));
+        }
+      }
+
+      function createReviewProposalCard(proposal) {
+          const card = document.createElement("article");
+          card.className = "review-proposal";
+          const content = document.createElement("p");
+          content.textContent = proposal.content;
+          const reason = document.createElement("small");
+          reason.textContent = `${proposal.action === "FOLLOW_UP" ? "Update existing memory" : "New memory"} · ${proposal.category} · ${proposal.importance}. ${proposal.reason}`;
+          const actions = document.createElement("div");
+          actions.className = "review-actions";
+          const approve = document.createElement("button");
+          approve.type = "button";
+          approve.textContent = "APPROVE";
+          approve.disabled = Boolean(proposal.pending);
+          approve.addEventListener("click", () => {
+            if (socket.readyState !== WebSocket.OPEN || proposal.pending) {
+              actionTag.textContent = "Waiting for server before approval";
+              return;
+            }
+            proposal.pending = true;
+            renderMemoryReviewQueue();
+            socket.send(JSON.stringify({
+              confirm_action: proposal.action === "FOLLOW_UP" ? "APPROVE_FOLLOW_UP" : "APPROVE_STORE",
+              proposal_id: proposal.key,
+              id: proposal.id,
+              text: proposal.content,
+              category: proposal.category,
+              importance: proposal.importance,
+              related_ids: proposal.relatedIDs,
+            }));
+          });
+          const reject = document.createElement("button");
+          reject.type = "button";
+          reject.className = "reject-proposal";
+          reject.textContent = "REJECT";
+          reject.disabled = Boolean(proposal.pending);
+          reject.addEventListener("click", () => {
+            reviewQueue.splice(reviewQueue.indexOf(proposal), 1);
+            renderMemoryReviewQueue();
+            actionTag.textContent = "Proposal rejected; nothing was saved";
+            appendSystemNotice("Memory proposal rejected; nothing was saved.");
+          });
+          actions.append(approve, reject);
+          card.append(content, reason, actions);
+          return card;
+      }
+
+      function resolveMemoryProposal(proposalID, failed = false) {
+        if (!proposalID) return;
+        const index = reviewQueue.findIndex((proposal) => proposal.key === proposalID);
+        if (index < 0) return;
+        if (failed) {
+          reviewQueue[index].pending = false;
+          actionTag.textContent = "Approval failed; proposal remains in the queue";
+        } else {
+          reviewQueue.splice(index, 1);
+          actionTag.textContent = "Memory proposal approved and saved";
+        }
+        renderMemoryReviewQueue();
+      }
+
+      function updateSelectionControls() {
+        const count = selectedIDs.size;
+        selectionCount.textContent = count ? `${count} node${count === 1 ? "" : "s"} selected` : "No nodes selected";
+        deleteSelectedButton.disabled = count === 0;
+      }
+
+      function showView(view) {
+        if (!["chat", "nodes", "settings"].includes(view)) return;
+        activeConsoleView = view;
+        const showNodes = view === "nodes";
+        const showSettings = view === "settings";
+        chatView.hidden = view !== "chat";
+        nodesView.hidden = !showNodes;
+        settingsView.hidden = !showSettings;
+        chatTab.setAttribute("aria-selected", String(view === "chat"));
+        nodesTab.setAttribute("aria-selected", String(showNodes));
+        settingsTab.setAttribute("aria-selected", String(showSettings));
+        saveNavigationState();
+      }
+
+      function saveMatrixSettings() {
+        localStorage.setItem("companion-matrix-settings", JSON.stringify(matrixSettings));
+      }
+
+      function applyMatrixSettings() {
+        idleOrbitInput.checked = matrixSettings.idleOrbit;
+        orbitSpeedInput.value = matrixSettings.orbitSpeed;
+        orbitSpeedValue.value = `${matrixSettings.orbitSpeed}/10`;
+        orbitDelayInput.value = matrixSettings.orbitDelay;
+        orbitDelayValue.value = `${matrixSettings.orbitDelay}s`;
+        fogInput.checked = matrixSettings.fog;
+        fogStrengthInput.value = matrixSettings.fogStrength;
+        fogStrengthValue.value = `${matrixSettings.fogStrength}%`;
+        textBrightnessInput.value = matrixSettings.textBrightness;
+        textBrightnessValue.value = `${matrixSettings.textBrightness}%`;
+        appColorInput.value = matrixSettings.appColor;
+        gridColorInput.value = matrixSettings.gridColor;
+        speakTextRepliesInput.checked = matrixSettings.speakTextReplies;
+        speakTextRepliesInput.disabled = !("speechSynthesis" in window);
+        wakePhraseInput.value = matrixSettings.wakePhrase;
+        wakeIntervalInput.value = matrixSettings.wakeIntervalSeconds;
+        wakeIntervalValue.value = `${matrixSettings.wakeIntervalSeconds}s`;
+        reviewMemoriesInput.checked = matrixSettings.reviewNewMemories;
+        document.documentElement.style.setProperty("--matrix-text-brightness", String(matrixSettings.textBrightness / 100));
+        document.documentElement.style.setProperty("--app-primary", matrixSettings.appColor);
+        document.documentElement.style.setProperty("--app-primary-border", `color-mix(in srgb, ${matrixSettings.appColor} 68%, white)`);
+      }
+
+      function updateMatrixSetting(key, value) {
+        matrixSettings[key] = value;
+        saveMatrixSettings();
+        applyMatrixSettings();
+        lastCameraInteraction = performance.now();
+      }
+
+      function setCameraMode(mode) {
+        cameraMode = mode;
+        lastCameraInteraction = performance.now();
+        orbitModeButton.setAttribute("aria-pressed", String(mode === "orbit"));
+        panModeButton.setAttribute("aria-pressed", String(mode === "pan"));
+        matrixPanel.dataset.cameraMode = mode;
+        actionTag.textContent = mode === "pan" ? "Pan mode: drag to move the matrix" : "Orbit mode: drag to rotate the matrix";
+      }
+
+      orbitModeButton.addEventListener("click", () => setCameraMode("orbit"));
+      panModeButton.addEventListener("click", () => setCameraMode("pan"));
+      chatTab.addEventListener("click", () => showView("chat"));
+      nodesTab.addEventListener("click", () => showView("nodes"));
+      settingsTab.addEventListener("click", () => showView("settings"));
+      fieldTabs.forEach((tab) => tab.addEventListener("click", () => showFieldView(tab.id.replace("field-", "").replace("-tab", ""))));
+      twoDPreviousButton.addEventListener("click", () => {
+        clearMemorySearch();
+        memoryPageIndex = Math.max(0, memoryPageIndex - 1);
+        saveNavigationState();
+        renderMemoryPages();
+      });
+      twoDNextButton.addEventListener("click", () => {
+        clearMemorySearch();
+        memoryPageIndex += 1;
+        saveNavigationState();
+        renderMemoryPages();
+      });
+      timelineRange.addEventListener("input", () => {
+        timelineWasFiltered = true;
+        renderTimeline();
+      });
+      function appendLabResult(label, result) {
+        const article = document.createElement("article");
+        article.className = "lab-result";
+        const heading = document.createElement("h3");
+        heading.textContent = label;
+        const decision = document.createElement("div");
+        decision.className = "lab-result-tag";
+        decision.textContent = `Simulated action: ${result.action} · not saved`;
+        const answer = document.createElement("p");
+        answer.textContent = result.response;
+        article.append(heading, decision, answer);
+        if (result.relevant_memories?.length) {
+          const used = document.createElement("div");
+          used.className = "field-note";
+          used.textContent = `Context used: ${result.relevant_memories.map((memory) => memory.content).join(" · ")}`;
+          article.append(used);
+        }
+        labResults.append(article);
+      }
+
+      async function requestLabSimulation(text, memories, useContext) {
+        const response = await fetch("/api/lab/simulate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, memories, use_context: useContext }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Memory Lab simulation failed.");
+        return result;
+      }
+
+      async function runLab(compare) {
+        const text = labPrompt.value.trim();
+        if (!text) {
+          actionTag.textContent = "Enter a test input for Memory Lab";
+          labPrompt.focus();
+          return;
+        }
+        const memories = selectedLabMemories();
+        labRunButton.disabled = true;
+        labCompareButton.disabled = true;
+        labResults.replaceChildren();
+        try {
+          if (compare && memories.length) {
+            const withContext = await requestLabSimulation(text, memories, true);
+            appendLabResult(`With ${memories.length} selected memory${memories.length === 1 ? "" : "ies"}`, withContext);
+            const withoutContext = await requestLabSimulation(text, [], false);
+            appendLabResult("Without saved context", withoutContext);
+          } else {
+            const result = await requestLabSimulation(text, memories, true);
+            appendLabResult(memories.length ? `With ${memories.length} selected memories` : "Without saved context", result);
+          }
+          actionTag.textContent = "Memory Lab finished · saved memory unchanged";
+        } catch (error) {
+          const message = document.createElement("div");
+          message.className = "field-note";
+          message.textContent = error.message || "Memory Lab simulation failed.";
+          labResults.append(message);
+          actionTag.textContent = "Memory Lab unavailable";
+        } finally {
+          labRunButton.disabled = false;
+          labCompareButton.disabled = false;
+        }
+      }
+
+      labRunButton.addEventListener("click", () => runLab(false));
+      labCompareButton.addEventListener("click", () => runLab(true));
+      labClearButton.addEventListener("click", () => {
+        labPrompt.value = "";
+        labResults.replaceChildren();
+        labPrompt.focus();
+      });
+      idleOrbitInput.addEventListener("change", () => updateMatrixSetting("idleOrbit", idleOrbitInput.checked));
+      orbitSpeedInput.addEventListener("input", () => updateMatrixSetting("orbitSpeed", Number(orbitSpeedInput.value)));
+      orbitDelayInput.addEventListener("input", () => updateMatrixSetting("orbitDelay", Number(orbitDelayInput.value)));
+      fogInput.addEventListener("change", () => updateMatrixSetting("fog", fogInput.checked));
+      fogStrengthInput.addEventListener("input", () => updateMatrixSetting("fogStrength", Number(fogStrengthInput.value)));
+      textBrightnessInput.addEventListener("input", () => updateMatrixSetting("textBrightness", Number(textBrightnessInput.value)));
+      appColorInput.addEventListener("input", () => updateMatrixSetting("appColor", appColorInput.value));
+      gridColorInput.addEventListener("input", () => updateMatrixSetting("gridColor", gridColorInput.value));
+      wakePhraseInput.addEventListener("change", () => {
+        const phrase = wakePhraseInput.value.trim().slice(0, 40) || settingDefaults.wakePhrase;
+        updateMatrixSetting("wakePhrase", phrase);
+      });
+      wakeIntervalInput.addEventListener("input", () => updateMatrixSetting("wakeIntervalSeconds", Number(wakeIntervalInput.value)));
+      reviewMemoriesInput.addEventListener("change", () => updateMatrixSetting("reviewNewMemories", reviewMemoriesInput.checked));
+      speakTextRepliesInput.addEventListener("change", () => updateMatrixSetting("speakTextReplies", speakTextRepliesInput.checked));
+      const settingsGroups = [...settingsView.querySelectorAll(".settings-group")];
+      settingsGroups.forEach((group) => group.addEventListener("toggle", () => {
+        if (group.open) settingsGroups.filter((other) => other !== group).forEach((other) => { other.open = false; });
+      }));
+      applyMatrixSettings();
+      resetViewButton.addEventListener("click", () => {
+        cameraX = 0.4;
+        cameraY = -0.5;
+        zoom = 1;
+        panX = 0;
+        panY = 0;
+        setCameraMode("orbit");
+        lastCameraInteraction = performance.now();
+      });
+
+      // Match the canvas backing resolution to its displayed size and device pixel ratio.
+      function resizeCanvas() {
+        const bounds = canvas.getBoundingClientRect();
+        const ratio = window.devicePixelRatio || 1;
+        canvas.width = Math.max(1, Math.round(bounds.width * ratio));
+        canvas.height = Math.max(1, Math.round(bounds.height * ratio));
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      }
+
+      new ResizeObserver(resizeCanvas).observe(canvas);
+      window.addEventListener("resize", resizeCanvas);
+      resizeCanvas();
+
+      // Update connection status and restore server-sent nodes as the socket opens.
+      socket.addEventListener("open", () => {
+        networkTag.textContent = "ONLINE";
+        networkTag.classList.add("online");
+        consoleLog.textContent = "Connected to the local companion. Saved memories are loading.";
+        liveTranscript = consoleLog.textContent;
+      });
+
+      socket.addEventListener("close", () => {
+        networkTag.textContent = "OFFLINE";
+        networkTag.classList.remove("online");
+        actionTag.textContent = "Connection closed";
+      });
+
+      socket.addEventListener("error", () => {
+        actionTag.textContent = "Could not reach the local server";
+      });
+
+      // Translate server events into matrix updates, transcript text, and speech output.
+      socket.addEventListener("message", (event) => {
+        let packet;
+        try {
+          packet = JSON.parse(event.data);
+        } catch {
+          appendText(event.data);
+          return;
+        }
+
+        if (packet.action) actionTag.textContent = packet.action.replace("_", " ");
+
+        switch (packet.type) {
+          case "restore_node":
+            addOrUpdateNode(packet, false, false);
+            break;
+          case "restore_complete":
+            memoryRestoreComplete = true;
+            memoryPageIndex = Math.min(memoryPageIndex, Math.max(0, Math.ceil(getCategoryMemoryNodes().length / memoriesPerPage) - 1));
+            saveNavigationState();
+            showView(activeConsoleView);
+            showFieldView(activeFieldView);
+            break;
+          case "new_node":
+            addOrUpdateNode(packet);
+            resolveMemoryProposal(packet.proposal_id);
+            break;
+          case "update_node":
+            addOrUpdateNode(packet, true);
+            resolveMemoryProposal(packet.proposal_id);
+            break;
+          case "memory_proposal":
+            reviewQueue.push({
+              key: globalThis.crypto?.randomUUID?.() || `proposal-${Date.now()}-${reviewQueue.length}`,
+              id: packet.id || "",
+              action: packet.action || "STORE",
+              content: packet.content || "",
+              category: packet.category || "other",
+              importance: packet.importance || "medium",
+              relatedIDs: Array.isArray(packet.related_ids) ? packet.related_ids : [],
+              reason: packet.reason || "Waiting for your approval.",
+            });
+            renderMemoryReviewQueue();
+            actionTag.textContent = "Memory proposal waiting for review";
+            break;
+          case "search_started":
+            clearMemorySearch();
+            activeCategoryPage = "all";
+            memoryPageIndex = 0;
+            searchAnimation = {
+              startedAt: performance.now(),
+              candidates: Array.isArray(packet.search_candidates) ? packet.search_candidates : [],
+              focusedID: packet.search_candidates?.[0]?.id || "",
+              focusIndex: 0,
+              resultID: "",
+              running: true,
+              finished: false,
+            };
+            showFieldView("2d");
+            if (!prefersReducedMotion) memorySearchTimer = window.setInterval(advanceMemorySearchPage, 520);
+            actionTag.textContent = searchAnimation.candidates.length ? "Searching saved memories…" : "Scanning the memory field…";
+            break;
+          case "search_result":
+            if (packet.id) {
+              if (searchAnimation) searchAnimation.resultID = packet.id;
+              addOrUpdateNode(packet, true);
+            }
+            else actionTag.textContent = packet.content;
+            break;
+          case "action_status":
+            actionTag.textContent = packet.content;
+            break;
+          case "confirm_delete":
+            if (window.confirm(`Delete this memory node?\n\n${packet.content}`)) {
+              socket.send(JSON.stringify({ confirm_action: "DELETE", id: packet.id }));
+            } else {
+              actionTag.textContent = "Deletion cancelled";
+            }
+            break;
+          case "confirm_delete_all":
+            requestBulkDeleteConfirmation("DELETE_ALL", Number(packet.content));
+            break;
+          case "node_deleted":
+            nodes.delete(packet.id);
+            selectedIDs.delete(packet.id);
+            labSelectedIDs.delete(packet.id);
+            expandedMemoryIDs.delete(packet.id);
+            for (let index = reviewQueue.length - 1; index >= 0; index -= 1) {
+              if (reviewQueue[index].action === "FOLLOW_UP" && reviewQueue[index].id === packet.id) reviewQueue.splice(index, 1);
+            }
+            sendButton.disabled = false;
+            layoutNodes();
+            updateCount();
+            renderMemoryManager();
+            appendSystemNotice("Memory node deleted.");
+            break;
+          case "nodes_cleared":
+            nodes.clear();
+            selectedIDs.clear();
+            labSelectedIDs.clear();
+            expandedMemoryIDs.clear();
+            for (let index = reviewQueue.length - 1; index >= 0; index -= 1) {
+              if (reviewQueue[index].action === "FOLLOW_UP") reviewQueue.splice(index, 1);
+            }
+            pulse = null;
+            sendButton.disabled = false;
+            updateCount();
+            renderMemoryManager();
+            appendSystemNotice(`${packet.content} memory nodes deleted.`);
+            break;
+          case "input_corrected":
+            consoleLog.textContent += `\n[Likely typo corrected] ${packet.content}`;
+            consoleLog.scrollTop = consoleLog.scrollHeight;
+            if (!viewingArchiveID) liveTranscript = consoleLog.textContent;
+            break;
+          case "stream_text":
+            appendText(packet.content || "");
+            if (pendingMode === "voice" || matrixSettings.speakTextReplies) queueSpeech(packet.content || "");
+            break;
+          case "response_done":
+            if (searchAnimation?.running) {
+              if (memorySearchTimer !== null) window.clearInterval(memorySearchTimer);
+              memorySearchTimer = null;
+              searchAnimation.running = false;
+              searchAnimation.finished = true;
+              if (searchAnimation.resultID) {
+                const resultIndex = getCategoryMemoryNodes().findIndex((node) => node.id === searchAnimation.resultID);
+                if (resultIndex >= 0) memoryPageIndex = Math.floor(resultIndex / memoriesPerPage);
+                searchAnimation.focusedID = searchAnimation.resultID;
+              }
+              saveNavigationState();
+              renderMemoryPages();
+            }
+            if (pendingMode === "voice" || matrixSettings.speakTextReplies) flushSpeech();
+            pendingMode = "text";
+            sendButton.disabled = false;
+            break;
+          case "error":
+            resolveMemoryProposal(packet.proposal_id, true);
+            appendText(`\n[Local service] ${packet.content || "Request failed."}`);
+            pendingMode = "text";
+            sendButton.disabled = false;
+            break;
+        }
+      });
+
+      // Append streamed reply fragments and keep the latest text visible.
+      function appendText(text) {
+        if (!responseActive) {
+          consoleLog.textContent += "\n\n[Companion] ";
+          responseActive = true;
+        }
+        consoleLog.textContent += text;
+        consoleLog.scrollTop = consoleLog.scrollHeight;
+        if (!viewingArchiveID) liveTranscript = consoleLog.textContent;
+      }
+
+      function appendSystemNotice(text) {
+        consoleLog.textContent += `\n\n[Memory] ${text}`;
+        consoleLog.scrollTop = consoleLog.scrollHeight;
+        if (!viewingArchiveID) liveTranscript = consoleLog.textContent;
+      }
+
+      function loadConversationArchive() {
+        try {
+          const parsed = JSON.parse(localStorage.getItem(conversationArchiveKey) || "[]");
+          if (!Array.isArray(parsed)) return [];
+          return parsed.filter((entry) => entry && typeof entry.id === "string" && typeof entry.transcript === "string")
+            .slice(0, maxArchivedConversations);
+        } catch {
+          return [];
+        }
+      }
+
+      function saveConversationArchive() {
+        try {
+          localStorage.setItem(conversationArchiveKey, JSON.stringify(archivedConversations));
+          return true;
+        } catch {
+          archiveState.textContent = "Browser storage is full";
+          return false;
+        }
+      }
+
+      function renderConversationArchive() {
+        conversationArchive.replaceChildren();
+        if (!archivedConversations.length) {
+          const empty = document.createElement("div");
+          empty.className = "archive-empty";
+          empty.textContent = "No saved conversations yet.";
+          conversationArchive.append(empty);
+          return;
+        }
+
+        for (const entry of archivedConversations) {
+          const row = document.createElement("div");
+          row.className = "archive-entry";
+          const openButton = document.createElement("button");
+          openButton.type = "button";
+          const savedDate = new Date(entry.savedAt);
+          const dateLabel = Number.isNaN(savedDate.getTime()) ? "Saved conversation" : savedDate.toLocaleString();
+          openButton.textContent = `${entry.title} · ${dateLabel}`;
+          openButton.title = entry.transcript.slice(0, 240);
+          openButton.addEventListener("click", () => {
+            if (sendButton.disabled) return;
+            liveTranscript = consoleLog.textContent;
+            viewingArchiveID = entry.id;
+            consoleLog.textContent = entry.transcript;
+            consoleLog.scrollTop = 0;
+            chatField.disabled = true;
+            sendButton.disabled = true;
+            liveMicDisabledBeforeArchive = micButton.disabled;
+            micButton.disabled = true;
+            saveConversationButton.disabled = true;
+            returnLiveChatButton.hidden = false;
+            archiveState.textContent = "Viewing saved conversation";
+            conversationArchive.hidden = true;
+            toggleArchivesButton.setAttribute("aria-expanded", "false");
+          });
+          const removeButton = document.createElement("button");
+          removeButton.type = "button";
+          removeButton.className = "archive-remove";
+          removeButton.textContent = "×";
+          removeButton.setAttribute("aria-label", `Delete saved conversation: ${entry.title}`);
+          removeButton.title = "Delete saved conversation";
+          removeButton.addEventListener("click", () => {
+            if (viewingArchiveID === entry.id) returnToLiveConversation();
+            archivedConversations = archivedConversations.filter((saved) => saved.id !== entry.id);
+            saveConversationArchive();
+            renderConversationArchive();
+            archiveState.textContent = "Saved conversation deleted";
+          });
+          row.append(openButton, removeButton);
+          conversationArchive.append(row);
+        }
+      }
+
+      function returnToLiveConversation() {
+        viewingArchiveID = "";
+        consoleLog.textContent = liveTranscript;
+        consoleLog.scrollTop = consoleLog.scrollHeight;
+        chatField.disabled = false;
+        sendButton.disabled = socket.readyState !== WebSocket.OPEN;
+        micButton.disabled = liveMicDisabledBeforeArchive;
+        saveConversationButton.disabled = false;
+        returnLiveChatButton.hidden = true;
+        archiveState.textContent = "Live conversation";
+      }
+
+      function archiveCurrentConversation() {
+        if (viewingArchiveID || sendButton.disabled) return;
+        const transcript = consoleLog.textContent.trim();
+        if (!transcript.includes("[You] ")) {
+          archiveState.textContent = "Nothing to save yet";
+          return;
+        }
+        const boundedTranscript = transcript.slice(-maxArchivedTranscriptLength);
+        const firstUserLine = boundedTranscript.match(/\[You\]\s*([^\n]+)/);
+        const title = firstUserLine?.[1]?.trim().slice(0, 72) || "Conversation";
+        archivedConversations.unshift({
+          id: globalThis.crypto?.randomUUID?.() || `chat-${Date.now()}`,
+          savedAt: new Date().toISOString(),
+          title,
+          transcript: boundedTranscript,
+        });
+        archivedConversations = archivedConversations.slice(0, maxArchivedConversations);
+        if (!saveConversationArchive()) return;
+        renderConversationArchive();
+        archiveState.textContent = `Saved · ${archivedConversations.length}/${maxArchivedConversations}`;
+      }
+
+      // Require a typed count phrase before sending any multi-node delete command.
+      let pendingBulkDelete = null;
+
+      function requestBulkDeleteConfirmation(action, count, ids = []) {
+        const phrase = action === "DELETE_ALL" ? `DELETE ALL ${count}` : `DELETE NODES ${count}`;
+        pendingBulkDelete = { action, count, ids, phrase };
+        bulkDeleteSummary.textContent = `This permanently deletes ${count} memory node${count === 1 ? "" : "s"}. This cannot be undone.`;
+        bulkDeleteRequiredPhrase.textContent = phrase;
+        bulkDeletePhrase.value = "";
+        bulkDeleteError.textContent = "";
+        confirmBulkDeleteButton.disabled = true;
+        bulkDeleteDialog.hidden = false;
+        bulkDeletePhrase.focus();
+      }
+
+      function closeBulkDeleteDialog() {
+        bulkDeleteDialog.hidden = true;
+        pendingBulkDelete = null;
+        bulkDeletePhrase.value = "";
+        sendButton.disabled = false;
+      }
+
+      bulkDeletePhrase.addEventListener("input", () => {
+        const phraseMatches = pendingBulkDelete && bulkDeletePhrase.value === pendingBulkDelete.phrase;
+        confirmBulkDeleteButton.disabled = !phraseMatches;
+        bulkDeleteError.textContent = bulkDeletePhrase.value && !phraseMatches ? "The confirmation phrase must match exactly." : "";
+      });
+
+      bulkDeleteForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (!pendingBulkDelete || bulkDeletePhrase.value !== pendingBulkDelete.phrase) return;
+        socket.send(JSON.stringify({
+          confirm_action: pendingBulkDelete.action,
+          confirm_phrase: pendingBulkDelete.phrase,
+          ids: pendingBulkDelete.ids,
+        }));
+        closeBulkDeleteDialog();
+      });
+
+      cancelBulkDeleteButton.addEventListener("click", () => {
+        closeBulkDeleteDialog();
+        actionTag.textContent = "Bulk deletion cancelled";
+      });
+
+      bulkDeletePhrase.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closeBulkDeleteDialog();
+          actionTag.textContent = "Bulk deletion cancelled";
+        }
+      });
+
+      bulkDeleteDialog.addEventListener("click", (event) => {
+        if (event.target === bulkDeleteDialog) {
+          closeBulkDeleteDialog();
+          actionTag.textContent = "Bulk deletion cancelled";
+        }
+      });
+
+      // Send text or recognized speech with its mode so voice requests receive audio replies.
+      function sendMessage(text, inputMode) {
+        if (viewingArchiveID) {
+          archiveState.textContent = "Return to live chat before sending";
+          return;
+        }
+        if (!text || socket.readyState !== WebSocket.OPEN) {
+          actionTag.textContent = socket.readyState === WebSocket.OPEN ? "Enter a message" : "Waiting for server";
+          return;
+        }
+        pendingMode = inputMode;
+        speechBuffer = "";
+        responseActive = false;
+        sendButton.disabled = true;
+        consoleLog.textContent += `\n\n[You] ${text}\n`;
+        consoleLog.scrollTop = consoleLog.scrollHeight;
+        liveTranscript = consoleLog.textContent;
+        actionTag.textContent = "Local memory and model evaluating";
+        socket.send(JSON.stringify({ text, input_mode: inputMode, review_memory: matrixSettings.reviewNewMemories }));
+      }
+
+      chatForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const text = chatField.value.trim();
+        if (!text) return;
+        chatField.value = "";
+        sendMessage(text, "text");
+      });
+
+      chatTab.addEventListener("click", () => showView("chat"));
+      nodesTab.addEventListener("click", () => showView("nodes"));
+      saveConversationButton.addEventListener("click", archiveCurrentConversation);
+      toggleArchivesButton.addEventListener("click", () => {
+        const opening = conversationArchive.hidden;
+        if (opening) renderConversationArchive();
+        conversationArchive.hidden = !opening;
+        toggleArchivesButton.setAttribute("aria-expanded", String(opening));
+      });
+      returnLiveChatButton.addEventListener("click", returnToLiveConversation);
+
+      deleteSelectedButton.addEventListener("click", () => {
+        const ids = [...selectedIDs].filter((id) => nodes.has(id));
+        if (ids.length === 0) return;
+        if (ids.length === 1 && window.confirm("Delete this selected memory node?")) {
+          socket.send(JSON.stringify({ confirm_action: "DELETE_SELECTED", ids }));
+        } else if (ids.length > 1) {
+          requestBulkDeleteConfirmation("DELETE_SELECTED", ids.length, ids);
+        }
+      });
+
+      clearAllButton.addEventListener("click", () => {
+        if (nodes.size === 0) {
+          actionTag.textContent = "There are no saved nodes";
+          return;
+        }
+        requestBulkDeleteConfirmation("DELETE_ALL", nodes.size);
+      });
+
+      // Queue complete sentences as soon as punctuation arrives in the streamed response.
+      function queueSpeech(text) {
+        if (!("speechSynthesis" in window)) return;
+        speechBuffer += text;
+        const sentenceEnd = /[.!?](?:["')\]]*)\s+/;
+        let boundary;
+        while ((boundary = speechBuffer.search(sentenceEnd)) >= 0) {
+          const end = boundary + 1;
+          speak(speechBuffer.slice(0, end).trim());
+          speechBuffer = speechBuffer.slice(end).trimStart();
+        }
+      }
+
+      function flushSpeech() {
+        if (speechBuffer.trim()) speak(speechBuffer.trim());
+        speechBuffer = "";
+      }
+
+      // Use the browser's installed speech voice; no audio file is written by this page.
+      function speak(text) {
+        if (!text || !("speechSynthesis" in window)) return;
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1;
+        window.speechSynthesis.speak(utterance);
+      }
+
+      const AudioRecorder = window.MediaRecorder;
+      if (AudioRecorder && navigator.mediaDevices?.getUserMedia) {
+        let recorder = null;
+        let microphoneStream = null;
+        let recordedChunks = [];
+        let voiceState = "idle";
+        let recordingTimer = null;
+        let previewTimer = null;
+        let meterFrame = null;
+        let audioContext = null;
+        let analyser = null;
+        let recordingStartedAt = 0;
+        let partialTranscription = null;
+        let wakeEnabled = false;
+        let wakeSegmentTimer = null;
+        let wakeQueue = Promise.resolve();
+        let waitingForWakeCommand = false;
+        let wakeMuteUntil = 0;
+
+        function setVoiceButtonState(recording) {
+          micButton.classList.toggle("listening", recording);
+          micButton.setAttribute("aria-pressed", String(recording));
+          micButton.setAttribute("aria-label", recording ? "Stop and transcribe voice input" : "Start voice input");
+          micButton.title = recording ? "Stop recording and transcribe locally" : "Record voice input locally";
+        }
+
+        function recordingToWav(audioBuffer) {
+          const outputRate = 16000;
+          const sourceRate = audioBuffer.sampleRate;
+          const outputFrames = Math.floor(audioBuffer.length * outputRate / sourceRate);
+          const mono = new Float32Array(audioBuffer.length);
+          for (let channel = 0; channel < audioBuffer.numberOfChannels; channel += 1) {
+            const samples = audioBuffer.getChannelData(channel);
+            for (let index = 0; index < samples.length; index += 1) mono[index] += samples[index] / audioBuffer.numberOfChannels;
+          }
+
+          let mean = 0;
+          let squareSum = 0;
+          let peak = 0;
+          for (const sample of mono) {
+            mean += sample;
+            squareSum += sample * sample;
+            peak = Math.max(peak, Math.abs(sample));
+          }
+          mean /= Math.max(1, mono.length);
+          const rms = Math.sqrt(squareSum / Math.max(1, mono.length));
+          let gain = Math.min(4, 0.12 / Math.max(0.03, rms));
+          if (peak > 0) gain = Math.min(gain, 0.98 / peak);
+
+          const dataBytes = outputFrames * 2;
+          const wav = new ArrayBuffer(44 + dataBytes);
+          const view = new DataView(wav);
+          const writeTag = (offset, tag) => [...tag].forEach((character, index) => view.setUint8(offset + index, character.charCodeAt(0)));
+          writeTag(0, "RIFF");
+          view.setUint32(4, 36 + dataBytes, true);
+          writeTag(8, "WAVE");
+          writeTag(12, "fmt ");
+          view.setUint32(16, 16, true);
+          view.setUint16(20, 1, true);
+          view.setUint16(22, 1, true);
+          view.setUint32(24, outputRate, true);
+          view.setUint32(28, outputRate * 2, true);
+          view.setUint16(32, 2, true);
+          view.setUint16(34, 16, true);
+          writeTag(36, "data");
+          view.setUint32(40, dataBytes, true);
+
+          for (let index = 0; index < outputFrames; index += 1) {
+            const sourcePosition = index * sourceRate / outputRate;
+            const left = Math.floor(sourcePosition);
+            const right = Math.min(left + 1, mono.length - 1);
+            const fraction = sourcePosition - left;
+            const interpolated = mono[left] * (1 - fraction) + mono[right] * fraction - mean;
+            const sample = Math.max(-1, Math.min(1, interpolated * gain));
+            view.setInt16(44 + index * 2, sample < 0 ? sample * 32768 : sample * 32767, true);
+          }
+          return new Blob([wav], { type: "audio/wav" });
+        }
+
+        function setVoiceTranscript(text, status) {
+          voicePreview.hidden = false;
+          voicePreviewStatus.textContent = status;
+          voiceTranscript.textContent = text;
+          voiceTranscript.classList.toggle("empty", !text);
+        }
+
+        function updateRecordingMeter() {
+          if (!['recording', 'wake'].includes(voiceState) || !analyser) return;
+          const samples = new Uint8Array(analyser.fftSize);
+          analyser.getByteTimeDomainData(samples);
+          let squareSum = 0;
+          for (const sample of samples) {
+            const centered = (sample - 128) / 128;
+            squareSum += centered * centered;
+          }
+          const level = Math.min(100, Math.round(Math.sqrt(squareSum / samples.length) * 360));
+          voiceLevelFill.style.width = `${level}%`;
+          voiceLevelTrack.setAttribute("aria-valuenow", String(level));
+          const elapsed = Math.floor((performance.now() - recordingStartedAt) / 1000);
+          voiceRecordingTime.textContent = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
+          meterFrame = requestAnimationFrame(updateRecordingMeter);
+        }
+
+        function normalizedWakeText(text) {
+          return text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+        }
+
+        function extractWakeCommand(transcript, phrase) {
+          const transcriptWords = [...transcript.matchAll(/\S+/g)];
+          const wakeWords = normalizedWakeText(phrase).split(" ");
+          for (let start = 0; start <= transcriptWords.length - wakeWords.length; start += 1) {
+            const candidate = transcriptWords.slice(start, start + wakeWords.length)
+              .map((match) => normalizedWakeText(match[0]))
+              .join(" ");
+            if (candidate !== wakeWords.join(" ")) continue;
+            const lastWord = transcriptWords[start + wakeWords.length - 1];
+            return transcript.slice(lastWord.index + lastWord[0].length).replace(/^[,.:;!?\s-]+/, "").trim();
+          }
+          return null;
+        }
+
+        async function transcribeWakeSegment(blob) {
+          if (!wakeEnabled || !audioContext || performance.now() < wakeMuteUntil) return;
+          const phrase = wakePhraseInput.value.trim() || settingDefaults.wakePhrase;
+          try {
+            const audioBuffer = await audioContext.decodeAudioData(await blob.arrayBuffer());
+            const formData = new FormData();
+            formData.append("audio", recordingToWav(audioBuffer), "wake-segment.wav");
+            const response = await fetch("/api/transcribe", { method: "POST", body: formData });
+            const result = await response.json();
+            if (response.status === 422) return;
+            if (!response.ok) throw new Error(result.error || "Local wake-word transcription failed.");
+
+            const transcript = String(result.text || "").trim();
+            if (!transcript) return;
+            voicePreview.hidden = false;
+            voiceTranscript.textContent = transcript;
+            voiceTranscript.classList.remove("empty");
+
+            if (waitingForWakeCommand) {
+              waitingForWakeCommand = false;
+              voicePreviewStatus.textContent = "Command heard · sending locally";
+              sendMessage(transcript, "voice");
+              wakeMuteUntil = performance.now() + 12000;
+              return;
+            }
+
+            const normalizedTranscript = normalizedWakeText(transcript);
+            const normalizedPhrase = normalizedWakeText(phrase);
+            if (!(` ${normalizedTranscript} `).includes(` ${normalizedPhrase} `)) {
+              voicePreviewStatus.textContent = `Listening for “${phrase}” · audio stays local`;
+              return;
+            }
+
+            const command = extractWakeCommand(transcript, phrase);
+            if (command) {
+              voicePreviewStatus.textContent = "Wake phrase heard · sending command";
+              sendMessage(command, "voice");
+              wakeMuteUntil = performance.now() + 12000;
+            } else {
+              waitingForWakeCommand = true;
+              voicePreviewStatus.textContent = `Wake phrase heard · say your command`;
+            }
+          } catch (error) {
+            if (!wakeEnabled) return;
+            voicePreviewStatus.textContent = `Wake listening error: ${error.message || "transcription failed"}`;
+          }
+        }
+
+        function startWakeSegment() {
+          if (!wakeEnabled || !microphoneStream) return;
+          const preferredType = ["audio/webm;codecs=opus", "audio/mp4"].find((type) => AudioRecorder.isTypeSupported(type));
+          const segmentRecorder = preferredType ? new AudioRecorder(microphoneStream, { mimeType: preferredType }) : new AudioRecorder(microphoneStream);
+          recorder = segmentRecorder;
+          recordedChunks = [];
+          segmentRecorder.addEventListener("dataavailable", (event) => {
+            if (event.data.size) recordedChunks.push(event.data);
+          });
+          segmentRecorder.addEventListener("stop", () => {
+            const blob = new Blob(recordedChunks, { type: segmentRecorder.mimeType || "audio/webm" });
+            if (recorder === segmentRecorder) recorder = null;
+            recordedChunks = [];
+            if (!wakeEnabled) {
+              microphoneStream?.getTracks().forEach((track) => track.stop());
+              microphoneStream = null;
+              wakeQueue.finally(async () => {
+                if (audioContext) await audioContext.close().catch(() => {});
+                audioContext = null;
+                analyser = null;
+                voiceState = "idle";
+                micButton.disabled = false;
+                voicePreviewStatus.textContent = "Wake phrase listening off";
+                voiceLevelFill.style.width = "0%";
+              });
+              return;
+            }
+            startWakeSegment();
+            if (blob.size) {
+              wakeQueue = wakeQueue.then(() => transcribeWakeSegment(blob)).catch((error) => {
+                if (wakeEnabled) voicePreviewStatus.textContent = `Wake listening error: ${error.message || "transcription failed"}`;
+              });
+            }
+          });
+          segmentRecorder.start(250);
+          wakeSegmentTimer = setTimeout(() => {
+            if (wakeEnabled && segmentRecorder.state === "recording") segmentRecorder.stop();
+          }, matrixSettings.wakeIntervalSeconds * 1000);
+        }
+
+        async function startWakeListening() {
+          if (wakeEnabled || voiceState !== "idle") return;
+          if (socket.readyState !== WebSocket.OPEN) throw new Error("Waiting for the local companion server.");
+          wakeEnabled = true;
+          waitingForWakeCommand = false;
+          voiceState = "requesting";
+          try {
+            microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContextClass) throw new Error("Audio capture is unavailable in this browser.");
+            audioContext = new AudioContextClass();
+            const audioSource = audioContext.createMediaStreamSource(microphoneStream);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 1024;
+            audioSource.connect(analyser);
+            voiceState = "wake";
+            recordingStartedAt = performance.now();
+            micButton.disabled = true;
+            voicePreview.hidden = false;
+            voiceRecordingTime.textContent = "00:00";
+            setVoiceTranscript("The microphone is active in this tab. Say the wake phrase, then your command.", `Listening for “${wakePhraseInput.value.trim() || settingDefaults.wakePhrase}” · audio stays local`);
+            showView("chat");
+            actionTag.textContent = "Local wake listening active";
+            meterFrame = requestAnimationFrame(updateRecordingMeter);
+            startWakeSegment();
+          } catch (error) {
+            wakeEnabled = false;
+            voiceState = "idle";
+            microphoneStream?.getTracks().forEach((track) => track.stop());
+            microphoneStream = null;
+            if (audioContext) await audioContext.close().catch(() => {});
+            audioContext = null;
+            analyser = null;
+            micButton.disabled = false;
+            throw error;
+          }
+        }
+
+        function stopWakeListening() {
+          if (!wakeEnabled) return;
+          wakeEnabled = false;
+          waitingForWakeCommand = false;
+          clearTimeout(wakeSegmentTimer);
+          cancelAnimationFrame(meterFrame);
+          meterFrame = null;
+          wakeEnableInput.checked = false;
+          voicePreviewStatus.textContent = "Stopping wake phrase listener…";
+          actionTag.textContent = "Wake phrase listening stopped";
+          if (recorder?.state === "recording") recorder.stop();
+          else {
+            microphoneStream?.getTracks().forEach((track) => track.stop());
+            microphoneStream = null;
+            voiceState = "idle";
+            micButton.disabled = false;
+          }
+        }
+
+        wakeEnableInput.addEventListener("change", async () => {
+          if (!wakeEnableInput.checked) {
+            stopWakeListening();
+            return;
+          }
+          try {
+            await startWakeListening();
+          } catch (error) {
+            wakeEnableInput.checked = false;
+            const messages = {
+              NotAllowedError: "Microphone access blocked. Allow it in browser and macOS settings.",
+              NotFoundError: "No microphone is available to the browser.",
+              NotReadableError: "The microphone is busy in another app.",
+            };
+            actionTag.textContent = messages[error.name] || error.message || "Could not start wake listening.";
+          }
+        });
+
+        async function transcribeRecording(blob, partial = false) {
+          if (!partial) {
+            micButton.disabled = true;
+            actionTag.textContent = "Preparing local transcription…";
+            setVoiceTranscript(voiceTranscript.textContent, "Final local transcription");
+          } else {
+            setVoiceTranscript(voiceTranscript.textContent, "Listening · updating local transcript");
+          }
+          try {
+            if (!audioContext) throw new Error("Audio conversion is unavailable in this browser.");
+            const audioBuffer = await audioContext.decodeAudioData(await blob.arrayBuffer());
+            const wav = recordingToWav(audioBuffer);
+            const formData = new FormData();
+            formData.append("audio", wav, "recording.wav");
+            if (!partial) actionTag.textContent = "Transcribing locally…";
+            const response = await fetch("/api/transcribe", { method: "POST", body: formData });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || "Local transcription failed.");
+            if (partial) {
+              setVoiceTranscript(result.text, "Live local transcript · keep speaking");
+            } else {
+              setVoiceTranscript(result.text, "Final transcript · sent to companion");
+              if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error("Companion server disconnected before transcription completed.");
+              sendMessage(result.text, "voice");
+            }
+          } catch (error) {
+            if (partial) {
+              setVoiceTranscript(voiceTranscript.classList.contains("empty") ? "" : voiceTranscript.textContent, "Live preview unavailable · final transcription will run on stop");
+            } else {
+              actionTag.textContent = `Voice input: ${error.message || "local transcription failed"}`;
+              setVoiceTranscript(voiceTranscript.textContent, "Transcription failed");
+            }
+          } finally {
+            if (!partial) {
+              voiceState = "idle";
+              micButton.disabled = false;
+              setVoiceButtonState(false);
+              voiceLevelFill.style.width = "0%";
+              if (audioContext) await audioContext.close().catch(() => {});
+              audioContext = null;
+            }
+          }
+        }
+
+        function requestPartialTranscript() {
+          if (voiceState !== "recording" || partialTranscription || recordedChunks.length === 0) return;
+          const blob = new Blob(recordedChunks, { type: recorder?.mimeType || "audio/webm" });
+          if (!blob.size) return;
+          partialTranscription = transcribeRecording(blob, true).finally(() => { partialTranscription = null; });
+        }
+
+        function stopRecording() {
+          if (voiceState !== "recording" || !recorder) return;
+          voiceState = "transcribing";
+          micButton.disabled = true;
+          clearTimeout(recordingTimer);
+          clearInterval(previewTimer);
+          cancelAnimationFrame(meterFrame);
+          meterFrame = null;
+          analyser = null;
+          voicePreviewStatus.textContent = "Finalizing local transcript…";
+          actionTag.textContent = "Transcribing locally…";
+          recorder.stop();
+        }
+
+        micButton.addEventListener("click", async () => {
+          if (voiceState === "recording") {
+            stopRecording();
+            return;
+          }
+          if (voiceState !== "idle") return;
+          if (socket.readyState !== WebSocket.OPEN) {
+            actionTag.textContent = "Waiting for server";
+            return;
+          }
+
+          voiceState = "requesting";
+          micButton.disabled = true;
+          actionTag.textContent = "Requesting microphone access…";
+          try {
+            microphoneStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContextClass) throw new Error("Audio conversion is unavailable in this browser.");
+            audioContext = new AudioContextClass();
+            const audioSource = audioContext.createMediaStreamSource(microphoneStream);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 1024;
+            audioSource.connect(analyser);
+            const preferredType = ["audio/webm;codecs=opus", "audio/mp4"].find((type) => AudioRecorder.isTypeSupported(type));
+            recorder = preferredType ? new AudioRecorder(microphoneStream, { mimeType: preferredType }) : new AudioRecorder(microphoneStream);
+            recordedChunks = [];
+            recorder.addEventListener("dataavailable", (event) => {
+              if (event.data.size) recordedChunks.push(event.data);
+            });
+            recorder.addEventListener("stop", async () => {
+              const blob = new Blob(recordedChunks, { type: recorder.mimeType || "audio/webm" });
+              microphoneStream?.getTracks().forEach((track) => track.stop());
+              microphoneStream = null;
+              recorder = null;
+              recordedChunks = [];
+              if (voiceState === "transcribing" && blob.size) {
+                if (partialTranscription) await partialTranscription;
+                await transcribeRecording(blob);
+              }
+              else {
+                voiceState = "idle";
+                micButton.disabled = false;
+                setVoiceButtonState(false);
+                if (audioContext) await audioContext.close().catch(() => {});
+                audioContext = null;
+              }
+            });
+            recorder.start(250);
+            voiceState = "recording";
+            recordingStartedAt = performance.now();
+            micButton.disabled = false;
+            setVoiceButtonState(true);
+            actionTag.textContent = "Recording locally… click VOICE to transcribe";
+            setVoiceTranscript("Speak naturally; your latest words will appear here as they are recognized locally.", "Recording · local preview starts in a few seconds");
+            voiceTranscript.classList.add("empty");
+            voiceRecordingTime.textContent = "00:00";
+            voiceLevelFill.style.width = "0%";
+            meterFrame = requestAnimationFrame(updateRecordingMeter);
+            previewTimer = setInterval(requestPartialTranscript, 6000);
+            recordingTimer = setTimeout(() => {
+              actionTag.textContent = "30-second limit reached; transcribing locally…";
+              stopRecording();
+            }, 30000);
+          } catch (error) {
+            voiceState = "idle";
+            micButton.disabled = false;
+            setVoiceButtonState(false);
+            microphoneStream?.getTracks().forEach((track) => track.stop());
+            microphoneStream = null;
+            if (audioContext) await audioContext.close().catch(() => {});
+            audioContext = null;
+            const messages = {
+              NotAllowedError: "Microphone access blocked. Allow it in browser and macOS settings.",
+              NotFoundError: "No microphone is available to the browser.",
+              NotReadableError: "The microphone is busy in another app.",
+            };
+            actionTag.textContent = messages[error.name] || `Microphone error: ${error.message || "could not start recording"}`;
+          }
+        });
+      } else {
+        micButton.disabled = true;
+        micButton.title = "Local audio recording is not supported in this browser";
+      }
+
+      // Rotate XYZ coordinates and project them into canvas pixel coordinates.
+      function project(node, width, height) {
+        const worldX = node.x * matrixScale;
+        const worldY = node.y * matrixScale;
+        const worldZ = node.z * matrixScale;
+        const x1 = worldX * Math.cos(cameraY) - worldZ * Math.sin(cameraY);
+        const z1 = worldX * Math.sin(cameraY) + worldZ * Math.cos(cameraY);
+        const y2 = worldY * Math.cos(cameraX) - z1 * Math.sin(cameraX);
+        const z2 = worldY * Math.sin(cameraX) + z1 * Math.cos(cameraX);
+        const cameraDistance = 900 + matrixScale * 130;
+        const perspective = (700 * zoom) / Math.max(160, z2 + cameraDistance);
+        return {
+          x: x1 * perspective + width / 2 + panX,
+          y: y2 * perspective + height / 2 + panY,
+          depth: z2,
+        };
+      }
+
+      function colorChannels(hex) {
+        const value = hex.replace("#", "");
+        return [0, 2, 4].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16)).join(", ");
+      }
+
+      function drawGrid(width, height) {
+        const xMin = -360;
+        const xMax = 360;
+        const zMin = -150;
+        const zMax = 150;
+        const yMin = -100;
+        const yMax = 100;
+        const categoryCounts = new Map();
+        for (const node of nodes.values()) {
+          const category = node.category || "other";
+          categoryCounts.set(category, (categoryCounts.get(category) || 0) + 1);
+        }
+        const largestCategory = Math.max(0, ...categoryCounts.values());
+        const planeSegments = Math.min(8, Math.max(1, Math.ceil(Math.sqrt(largestCategory))));
+        const divisions = (minimum, maximum, segments) => Array.from({ length: segments + 1 }, (_, index) => minimum + ((maximum - minimum) * index) / segments);
+        const xCoordinates = divisions(xMin, xMax, planeSegments);
+        const yCoordinates = divisions(yMin, yMax, planeSegments);
+        const categoryPlanes = [...categoryPlanePositions(categoriesWithMemories()).values()];
+        const zCoordinates = [...new Set([zMin, ...categoryPlanes, zMax])].sort((first, second) => first - second);
+        const gridOpacity = prefersReducedMotion ? 0.13 : 0.13 + (Math.sin(animationPhase) + 1) * 0.025;
+        const gridRGB = colorChannels(matrixSettings.gridColor);
+        const gridColor = `rgba(${gridRGB}, ${gridOpacity})`;
+        const majorGridColor = `rgba(${gridRGB}, 0.42)`;
+
+        function line(start, end, color = gridColor, widthPx = 0.7) {
+          const first = project(start, width, height);
+          const second = project(end, width, height);
+          context.strokeStyle = color;
+          context.lineWidth = widthPx;
+          context.beginPath();
+          context.moveTo(first.x, first.y);
+          context.lineTo(second.x, second.y);
+          context.stroke();
+        }
+
+        // Draw topic/age grids across the floor and ceiling faces.
+        for (const y of [yMin, yMax]) {
+          for (const x of xCoordinates) {
+            line({ x, y, z: zMin }, { x, y, z: zMax }, gridColor);
+          }
+          for (const z of zCoordinates) {
+            line({ x: xMin, y, z }, { x: xMax, y, z }, gridColor);
+          }
+        }
+
+        // Draw category planes at their actual depths; another category adds a plane.
+        for (const z of categoryPlanes) {
+          for (const x of xCoordinates) {
+            line({ x, y: yMin, z }, { x, y: yMax, z }, gridColor);
+          }
+          for (const y of yCoordinates) {
+            line({ x: xMin, y, z }, { x: xMax, y, z }, gridColor);
+          }
+        }
+
+        // Add topic/importance grids to the front and back faces.
+        for (const z of [zMin, zMax]) {
+          for (const x of xCoordinates) {
+            line({ x, y: yMin, z }, { x, y: yMax, z }, gridColor);
+          }
+          for (const y of yCoordinates) {
+            line({ x: xMin, y, z }, { x: xMax, y, z }, gridColor);
+          }
+        }
+
+        // Side faces complete the volume and make importance and age coordinates visible.
+        for (const x of [xMin, xMax]) {
+          for (const y of yCoordinates) {
+            line({ x, y, z: zMin }, { x, y, z: zMax }, gridColor);
+          }
+          for (const z of zCoordinates) {
+            line({ x, y: yMin, z }, { x, y: yMax, z }, gridColor);
+          }
+        }
+
+        if (matrixSettings.fog && matrixSettings.fogStrength > 0) {
+          const fog = context.createRadialGradient(width / 2, height / 2, Math.min(width, height) * 0.12, width / 2, height / 2, Math.max(width, height) * 0.72);
+          const strength = matrixSettings.fogStrength / 100;
+          fog.addColorStop(0, "rgba(7, 16, 24, 0)");
+          fog.addColorStop(0.55, `rgba(7, 16, 24, ${strength * 0.28})`);
+          fog.addColorStop(1, `rgba(7, 16, 24, ${strength})`);
+          context.fillStyle = fog;
+          context.fillRect(0, 0, width, height);
+        }
+
+        // Emphasize the three zero lines and label importance at the left grid edge.
+        line({ x: xMin, y: 0, z: zMin }, { x: xMax, y: 0, z: zMin }, majorGridColor, 1.1);
+        line({ x: xMin, y: yMin, z: 0 }, { x: xMin, y: yMax, z: 0 }, majorGridColor, 1.1);
+        line({ x: 0, y: yMin, z: zMin }, { x: 0, y: yMin, z: zMax }, majorGridColor, 1.1);
+        context.fillStyle = "#d2e2df";
+        context.globalAlpha = matrixSettings.textBrightness / 100;
+        context.font = "9px SFMono-Regular, Consolas, monospace";
+        for (const [label, y] of [["HIGH", -70], ["MED", 0], ["LOW", 70]]) {
+          const point = project({ x: xMin, y, z: zMax }, width, height);
+          context.fillText(label, Math.max(4, point.x - 30), point.y + 3);
+        }
+        context.globalAlpha = 1;
+
+        // A faint plane sweeps along the age axis to make the full lattice feel active.
+        const sweepProgress = prefersReducedMotion ? 0.5 : ((animationPhase * 22) % (zMax - zMin)) / (zMax - zMin);
+        const sweepZ = zMin + sweepProgress * (zMax - zMin);
+        const edgeFade = prefersReducedMotion ? 1 : Math.min(1, sweepProgress / 0.16, (1 - sweepProgress) / 0.16);
+        const easedFade = edgeFade * edgeFade * (3 - 2 * edgeFade);
+        context.strokeStyle = `rgba(${gridRGB}, ${0.78 * easedFade})`;
+        context.lineWidth = 1;
+        context.beginPath();
+        const sweepCorners = [
+          project({ x: xMin, y: yMin, z: sweepZ }, width, height),
+          project({ x: xMax, y: yMin, z: sweepZ }, width, height),
+          project({ x: xMax, y: yMax, z: sweepZ }, width, height),
+          project({ x: xMin, y: yMax, z: sweepZ }, width, height),
+        ];
+        context.moveTo(sweepCorners[0].x, sweepCorners[0].y);
+        for (let index = 1; index < sweepCorners.length; index += 1) {
+          context.lineTo(sweepCorners[index].x, sweepCorners[index].y);
+        }
+        context.closePath();
+        context.stroke();
+      }
+
+      // Draw neighbor links, the active search pulse, and depth-scaled memory nodes.
+      function drawMatrix() {
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+        matrixScale += (targetMatrixScale - matrixScale) * 0.035;
+        if (!prefersReducedMotion) {
+          animationPhase += 0.012;
+          idleOrbit += 0.003;
+          if (matrixSettings.idleOrbit && cameraMode === "orbit" && !dragging && !pointerOverMatrix && !document.hidden && document.hasFocus() && performance.now() - lastCameraInteraction > matrixSettings.orbitDelay * 1000) {
+            const speed = matrixSettings.orbitSpeed / 4;
+            cameraY += 0.0008 * speed;
+            cameraX = 0.4 + Math.sin(idleOrbit) * 0.18;
+          }
+        }
+        context.clearRect(0, 0, width, height);
+        drawGrid(width, height);
+        const visible = [...nodes.values()].map((node) => ({ node, point: project(node, width, height) }));
+        visible.sort((a, b) => b.point.depth - a.point.depth);
+
+        // Draw only stored relations; cross-category links connect their depth planes.
+        context.setLineDash([3, 5]);
+        for (const node of nodes.values()) {
+          for (const relatedID of node.relatedIDs) {
+            const relatedNode = nodes.get(relatedID);
+            if (!relatedNode || node.id.localeCompare(relatedID) >= 0) continue;
+            const first = project(node, width, height);
+            const second = project(relatedNode, width, height);
+            const crossesPlanes = node.category !== relatedNode.category;
+            context.strokeStyle = crossesPlanes ? "rgba(239, 181, 117, 0.42)" : "rgba(157, 179, 177, 0.16)";
+            context.lineWidth = crossesPlanes ? 1.1 : 0.7;
+            context.beginPath();
+            context.moveTo(first.x, first.y);
+            context.lineTo(second.x, second.y);
+            context.stroke();
+          }
+        }
+        context.setLineDash([]);
+
+        if (pulse) {
+          const center = project(pulse, width, height);
+          pulse.radius += 3;
+          context.strokeStyle = `rgba(236, 168, 111, ${Math.max(0, 1 - pulse.radius / 180)})`;
+          context.lineWidth = 1.5;
+          context.beginPath();
+          context.arc(center.x, center.y, pulse.radius, 0, Math.PI * 2);
+          context.stroke();
+          if (pulse.radius > 180) pulse = null;
+        }
+
+        drawSearchTraversal(width, height);
+
+        const categoryColors = {
+          health: "111, 196, 176",
+          work: "89, 190, 207",
+          relationships: "236, 142, 128",
+          goals: "186, 205, 119",
+          preferences: "164, 163, 224",
+          home: "216, 179, 126",
+          other: "157, 179, 177",
+        };
+        const placedLabels = [{
+          left: 0,
+          right: width,
+          top: 0,
+          bottom: 110,
+        }, {
+          left: 0,
+          right: Math.min(width * 0.42, 220),
+          top: height * 0.1,
+          bottom: height * 0.38,
+        }];
+        for (const { node, point } of visible) {
+          const glow = prefersReducedMotion ? 1 : 1 + Math.sin(animationPhase + node.x * 0.01) * 0.06;
+          const nodeDepth = Math.max(160, point.depth + 900 + matrixScale * 130);
+          const size = Math.max(2, (700 * zoom / nodeDepth) * 5) * node.scale * glow;
+          const color = node.match || selectedIDs.has(node.id) ? "236, 168, 111" : categoryColors[node.category] || categoryColors.other;
+          context.fillStyle = `rgba(${color}, 0.15)`;
+          context.beginPath();
+          context.arc(point.x, point.y, size * 2.7, 0, Math.PI * 2);
+          context.fill();
+          context.fillStyle = `rgba(${color}, 0.9)`;
+          context.beginPath();
+          context.arc(point.x, point.y, size, 0, Math.PI * 2);
+          context.fill();
+
+          if (selectedIDs.has(node.id)) {
+            context.strokeStyle = "#f0c39b";
+            context.lineWidth = 1.5;
+            context.beginPath();
+            context.arc(point.x, point.y, size + 5, 0, Math.PI * 2);
+            context.stroke();
+          }
+
+          if (node.match || selectedIDs.has(node.id) || nodes.size <= 12 || size > 7) {
+            context.fillStyle = node.match ? "#f0c39b" : "#dce9e6";
+            context.globalAlpha = matrixSettings.textBrightness / 100;
+            const labelFontSize = Math.max(9, Math.min(11, 9 + (matrixScale - 0.28) * 2));
+            context.font = `${labelFontSize}px SFMono-Regular, Consolas, monospace`;
+            const label = `${node.category} · ${node.content.slice(0, 22)}`;
+            const labelWidth = context.measureText(label).width;
+            let labelX = point.x + size + 7;
+            if (labelX + labelWidth > width - 10) labelX = point.x - size - labelWidth - 7;
+            labelX = Math.max(10, Math.min(width - labelWidth - 10, labelX));
+            const baseY = Math.max(12, Math.min(height - 8, point.y + 4));
+            const offsets = [0, -18, 18, -36, 36, -54, 54, -72, 72, -90, 90, -108, 108, -126, 126, -144, 144];
+            let labelY = baseY;
+            for (const offset of offsets) {
+              const candidateY = Math.max(12, Math.min(height - 8, baseY + offset));
+              const overlaps = placedLabels.some((placed) =>
+                labelX < placed.right && labelX + labelWidth > placed.left &&
+                candidateY - 10 < placed.bottom && candidateY + 3 > placed.top
+              );
+              if (!overlaps) {
+                labelY = candidateY;
+                break;
+              }
+            }
+            if (Math.abs(labelY - baseY) > 8) {
+              const labelAnchorX = labelX > point.x ? labelX : labelX + labelWidth;
+              context.strokeStyle = "rgba(157, 179, 177, 0.35)";
+              context.lineWidth = 0.7;
+              context.beginPath();
+              context.moveTo(point.x, point.y);
+              context.lineTo(labelAnchorX, labelY - 4);
+              context.stroke();
+            }
+            placedLabels.push({ left: labelX, right: labelX + labelWidth, top: labelY - 10, bottom: labelY + 3 });
+            context.fillText(label, labelX, labelY);
+            context.globalAlpha = 1;
+          }
+          if (node.scale > 1) node.scale = Math.max(1, node.scale - 0.035);
+        }
+        requestAnimationFrame(drawMatrix);
+      }
+
+      function drawSearchTraversal(width, height) {
+        if (!searchAnimation?.running) return;
+        const elapsed = performance.now() - searchAnimation.startedAt;
+        const candidates = searchAnimation.candidates;
+        const segmentDuration = 420;
+        const totalDuration = Math.max(900, candidates.length * segmentDuration + 180);
+        if (elapsed >= totalDuration) return;
+
+        const color = colorChannels(matrixSettings.appColor);
+        context.save();
+        context.strokeStyle = `rgba(${color}, 0.88)`;
+        context.fillStyle = `rgba(${color}, 0.2)`;
+        context.lineWidth = 2;
+        if (candidates.length === 0) {
+          const progress = Math.min(1, elapsed / 900);
+          const x = -360 + progress * 720;
+          const first = project({ x, y: -100, z: 0 }, width, height);
+          const second = project({ x, y: 100, z: 0 }, width, height);
+          context.beginPath();
+          context.moveTo(first.x, first.y);
+          context.lineTo(second.x, second.y);
+          context.stroke();
+        } else {
+          const index = Math.min(candidates.length - 1, Math.floor(elapsed / segmentDuration));
+          const node = nodes.get(candidates[index].id);
+          const point = node && project(node, width, height);
+          if (index > 0) {
+            const previousNode = nodes.get(candidates[index - 1].id);
+            if (previousNode && node) {
+              const previous = project(previousNode, width, height);
+              context.setLineDash([5, 5]);
+              context.beginPath();
+              context.moveTo(previous.x, previous.y);
+              context.lineTo(point.x, point.y);
+              context.stroke();
+              context.setLineDash([]);
+            }
+          }
+          if (point) {
+            const phase = (elapsed % segmentDuration) / segmentDuration;
+            const radius = 8 + phase * 18;
+            context.globalAlpha = 1 - phase * 0.45;
+            context.beginPath();
+            context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+            context.fill();
+            context.beginPath();
+            context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+            context.stroke();
+          }
+        }
+        context.restore();
+      }
+
+      function selectNearestNode(screenX, screenY) {
+        let nearest = null;
+        let nearestDistance = 32;
+        for (const node of nodes.values()) {
+          const point = project(node, canvas.clientWidth, canvas.clientHeight);
+          const distance = Math.hypot(point.x - screenX, point.y - screenY);
+          if (distance < nearestDistance) {
+            nearest = node;
+            nearestDistance = distance;
+          }
+        }
+        if (!nearest) return;
+        if (selectedIDs.has(nearest.id)) selectedIDs.delete(nearest.id);
+        else selectedIDs.add(nearest.id);
+        renderMemoryManager();
+      }
+
+      // Pointer dragging rotates the view; wheel input changes its zoom depth.
+      canvas.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) return;
+        lastCameraInteraction = performance.now();
+        dragging = true;
+        pointerMoved = false;
+        lastPointer = { x: event.clientX, y: event.clientY };
+        canvas.setPointerCapture(event.pointerId);
+      });
+      canvas.addEventListener("pointerup", (event) => {
+        if (dragging && !pointerMoved) selectNearestNode(event.offsetX, event.offsetY);
+        dragging = false;
+        lastCameraInteraction = performance.now();
+      });
+      canvas.addEventListener("pointercancel", () => { dragging = false; });
+      canvas.addEventListener("pointerenter", () => { pointerOverMatrix = true; });
+      canvas.addEventListener("pointerleave", () => {
+        pointerOverMatrix = false;
+        lastCameraInteraction = performance.now();
+      });
+      canvas.addEventListener("pointermove", (event) => {
+        if (!dragging) return;
+        lastCameraInteraction = performance.now();
+        if (Math.hypot(event.clientX - lastPointer.x, event.clientY - lastPointer.y) > 3) pointerMoved = true;
+        if (!pointerMoved) return;
+        const deltaX = event.clientX - lastPointer.x;
+        const deltaY = event.clientY - lastPointer.y;
+        if (cameraMode === "pan") {
+          panX = Math.max(-canvas.clientWidth * 1.5, Math.min(canvas.clientWidth * 1.5, panX + deltaX));
+          panY = Math.max(-canvas.clientHeight * 1.5, Math.min(canvas.clientHeight * 1.5, panY + deltaY));
+        } else {
+          cameraY += deltaX * 0.006;
+          cameraX = Math.max(-1.45, Math.min(1.45, cameraX + deltaY * 0.006));
+        }
+        lastPointer = { x: event.clientX, y: event.clientY };
+      });
+
+      canvas.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        lastCameraInteraction = performance.now();
+        const zoomFactor = Math.exp(-event.deltaY * 0.001);
+        zoom = Math.max(0.65, Math.min(1.8, zoom * zoomFactor));
+      }, { passive: false });
+
+      layoutNodes();
+      updateCount();
+      showView(activeConsoleView);
+      showFieldView(activeFieldView);
+      drawMatrix();
+    </script>
+  </body>
+</html>

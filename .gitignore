@@ -1,0 +1,43 @@
+# Local environment and machine-specific settings
+.env
+.env.*
+!.env.example
+/companion_brain/config/config.env
+/companion_brain/config/*.local.env
+
+# Personal memory data and append journal
+/companion_brain/data/memory.json
+/companion_brain/data/memory.json.wal
+/companion_brain/data/memory.json.tmp
+/companion_brain/data/*.wal
+/companion_brain/data/*.tmp
+/companion_brain/data/*.tmp.*
+
+# Local audio and transcription artifacts
+*.wav
+*.webm
+*.mp3
+*.pcm
+
+# Go build, test, and coverage outputs
+**/bin/
+**/dist/
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Logs, temporary files, and operating-system metadata
+*.log
+*.tmp
+.DS_Store
+**/.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Editor and local workspace state
+.idea/
+.vscode/
+*.swp
+*.swo

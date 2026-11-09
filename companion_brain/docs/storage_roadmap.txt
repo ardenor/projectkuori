@@ -1,0 +1,27 @@
+Done so far
+
+- Built the local companion UI: 3D field, readable 2D memory tiles with paging, timeline, Memory Lab, and review queue.
+- Added animated search traversal and fixed preferred-name recall behavior.
+- Added persistence for the selected tabs, category, and page across refreshes.
+- Added an opt-in browser conversation archive, capped at five transcripts of 6,000 characters each.
+- Added browser speech for voice replies and an option to speak typed replies. Settings are collapsible.
+- Reworked the 3D matrix so categories occupy Z planes, memories within each category spread across X-Y, and explicitly linked memories get subtle connectors.
+- Added four temporary production memories in health, work, home, and goals to test the category planes and links. They remain in the actual memory store for later deletion.
+- Replaced whole-file writes on every change with a versioned, checksummed append journal beside the readable JSON snapshot. Added replay, partial-tail recovery, and periodic checkpoints.
+- Added an in-house inverted search index over exact words, word pairs, and character n-grams. Existing cosine scoring still ranks the candidates. Documented the storage format and limitations in README.md.
+
+Verification
+
+- Full Go tests and race-enabled tests pass.
+- Tests cover journal recovery, checksums, checkpoints, mutation rollback, recall ranking, typo/name recall, and candidate pruning.
+- The production app is running and shows six memories.
+
+Remaining for the broader hosted goal
+
+- Benchmark search latency, candidate counts, memory use, and recall quality on realistic, larger datasets; tune the common n-gram cutoff based on those results.
+- Add tenant-scoped IDs and enforce tenant isolation across storage, search, and API operations.
+- Define safe multi-process write ownership or partitioning. The current store is single-writer and loads its data and index into RAM.
+- Expand crash/recovery and backup testing, including checkpoint interruption and restoration from the snapshot plus journal.
+- Then design replication and multi-server deployment around measured needs.
+
+The first scalable-storage steps are in place, but the system is not yet ready for multi-tenant or multi-server hosting.
